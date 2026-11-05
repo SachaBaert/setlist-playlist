@@ -15,6 +15,7 @@ export interface Setlist {
   date: string; // dd-MM-yyyy
   venue: string;
   city: string;
+  url: string; // setlist.fm page, for attribution
   songs: SetlistSong[];
 }
 
@@ -39,6 +40,13 @@ export function toSetlistText(setlist: Setlist, includeTapes: boolean): string {
     .filter((s) => includeTapes || !s.tape)
     .map((s, i) => `${i + 1}. ${s.name}${s.cover ? ` | ${s.cover}` : ''}`)
     .join('\n');
+}
+
+/** Playlist description; setlist.fm's API terms ask for attribution with a link. */
+export function playlistDescription(artistName: string, sourceUrl: string | null): string {
+  return sourceUrl
+    ? `${artistName} setlist from setlist.fm: ${sourceUrl}`
+    : `Setlist by ${artistName}, made with Setlist to Playlist.`;
 }
 
 /** "Kneecap – Venue, City (2025-06-27)" */

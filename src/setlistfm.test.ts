@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { extractSetlistId, playlistName, toSetlistText, type Setlist } from './setlistfm';
+import { extractSetlistId, playlistDescription, playlistName, toSetlistText, type Setlist } from './setlistfm';
 
 const SETLIST: Setlist = {
   artist: 'Kneecap',
   date: '27-06-2025',
   venue: 'Worthy Farm',
   city: 'Pilton',
+  url: 'https://www.setlist.fm/setlist/kneecap/2025/x-3bd6a8c8.html',
   songs: [
     { name: 'Favourite', tape: true, cover: 'Fontaines D.C.', encore: false },
     { name: 'Éire go Deo', tape: false, cover: null, encore: false },
@@ -36,5 +37,14 @@ describe('toSetlistText', () => {
 describe('playlistName', () => {
   it('builds artist, place and ISO date', () => {
     expect(playlistName(SETLIST)).toBe('Kneecap – Worthy Farm, Pilton (2025-06-27)');
+  });
+});
+
+describe('playlistDescription', () => {
+  it('credits setlist.fm with a link when imported', () => {
+    expect(playlistDescription('Kneecap', SETLIST.url)).toBe(`Kneecap setlist from setlist.fm: ${SETLIST.url}`);
+  });
+  it('falls back to a plain description for pasted lists', () => {
+    expect(playlistDescription('Kneecap', null)).toContain('Setlist by Kneecap');
   });
 });

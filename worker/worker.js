@@ -54,6 +54,7 @@ function simplify(data) {
     date: data.eventDate ?? '', // dd-MM-yyyy
     venue: data.venue?.name ?? '',
     city: data.venue?.city?.name ?? '',
+    url: data.url ?? '',
     songs,
   };
 }

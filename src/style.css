@@ -145,3 +145,12 @@ button:disabled { opacity: 0.5; cursor: progress; }
 label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; color: var(--muted); }
 label.check input { width: auto; }
 .by { color: var(--muted); font-weight: 400; }
+
+.credit { margin: 0; font-size: 13px; color: var(--muted); }
+.credit a { color: inherit; }
+button.link { background: none; border: 0; padding: 0; font: 13px Inter, system-ui, sans-serif; color: var(--muted); text-decoration: underline; justify-self: start; cursor: pointer; }
+button.link:hover { color: var(--ink); }
+.manual-row { display: flex; gap: 6px; }
+.manual-row input { padding: 6px 8px; font-size: 13px; }
+button.small { padding: 6px 14px; font-size: 13px; flex-shrink: 0; }
+.badge[data-conf='manual'] { color: var(--accent); }

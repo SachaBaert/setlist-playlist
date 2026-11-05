@@ -1,8 +1,8 @@
 import './style.css';
 import { handleRedirect, isLoggedIn, login, logout } from './auth';
 import { parseSetlist, rankCandidates, type Confidence } from './match';
-import { extractSetlistId, fetchSetlist, playlistName, toSetlistText, WORKER_URL } from './setlistfm';
-import { addItems, createPlaylist, searchArtists, searchTracks, type Artist, type Track } from './spotify';
+import { extractSetlistId, fetchSetlist, playlistDescription, playlistName, toSetlistText, WORKER_URL } from './setlistfm';
+import { addItems, createPlaylist, searchAny, searchArtists, searchTracks, type Artist, type Track } from './spotify';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -13,12 +13,14 @@ const DRAFT_KEY = 'setlist_draft';
 interface Row {
   title: string;
   artist: Artist | null; // the artist this row was searched under
-  options: { track: Track; confidence: Confidence }[];
+  options: { track: Track; confidence: Confidence | 'manual' }[];
   choice: number; // index into options, -1 = skip
 }
 
 let rows: Row[] = [];
 let artist: Artist | null = null;
+let importedFrom: string | null = null; // setlist.fm URL, for attribution
+let searchingRow: number | null = null; // row with the manual search box open
 
 function show(view: keyof typeof views) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
@@ -43,7 +45,7 @@ const fields = () => ({
 function saveDraft() {
   const f = fields();
   try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ artist: f.artist.value, name: f.name.value, setlist: f.setlist.value }));
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ artist: f.artist.value, name: f.name.value, setlist: f.setlist.value, importedFrom }));
   } catch {
     /* storage unavailable, not critical */
   }
@@ -57,6 +59,7 @@ function loadDraft() {
     f.artist.value = d.artist ?? '';
     f.name.value = d.name ?? '';
     f.setlist.value = d.setlist ?? '';
+    importedFrom = d.importedFrom ?? null;
   } catch {
     /* ignore */
   }
@@ -106,6 +109,7 @@ async function runMatching(event: Event) {
       const options = rankCandidates(entry.title, results, by.id).map(({ track, confidence }) => ({ track, confidence }));
       return { title: entry.title, artist: by, options, choice: options.length ? 0 : -1 };
     });
+    searchingRow = null;
     setStatus('');
     renderReview();
     show('review');
@@ -131,6 +135,9 @@ async function importSetlist() {
   try {
     setStatus('Fetching setlist…');
     const setlist = await fetchSetlist(id);
+    // Older cached Worker responses have no url; fall back to the pasted link.
+    const pasted = $<HTMLInputElement>('import-url').value.trim();
+    importedFrom = setlist.url || (/^https?:\/\//.test(pasted) ? pasted : null);
     const f = fields();
     f.artist.value = setlist.artist;
     f.name.value = playlistName(setlist);
@@ -149,7 +156,7 @@ async function importSetlist() {
 }
 
 // --- Review screen ---
-const LABEL: Record<Confidence, string> = { exact: 'Exact', close: 'Close', weak: 'Check', none: 'Not found' };
+const LABEL: Record<Confidence | 'manual', string> = { exact: 'Exact', close: 'Close', weak: 'Check', none: 'Not found', manual: 'Picked' };
 
 function formatDuration(ms: number) {
   const s = Math.round(ms / 1000);
@@ -159,14 +166,14 @@ function formatDuration(ms: number) {
 function renderReview() {
   $('artist-line').innerHTML = `Artist: <strong>${escapeHtml(artist!.name)}</strong>`;
   const found = rows.filter((r) => r.choice >= 0).length;
-  const toCheck = rows.filter((r) => r.choice >= 0 && r.options[r.choice].confidence !== 'exact').length;
+  const toCheck = rows.filter((r) => r.choice >= 0 && !['exact', 'manual'].includes(r.options[r.choice].confidence)).length;
   $('summary').textContent =
     `${found} of ${rows.length} songs matched` + (toCheck ? `, ${toCheck} worth a second look.` : '.');
 
   $('results').innerHTML = rows
     .map((row, i) => {
       const picked = row.choice >= 0 ? row.options[row.choice] : null;
-      const conf: Confidence = picked ? picked.confidence : 'none';
+      const conf: Confidence | 'manual' = picked ? picked.confidence : 'none';
       const img = picked?.track.album.images.at(-1)?.url;
       const options = row.options
         .map(
@@ -184,6 +191,14 @@ function renderReview() {
               ${options}
               <option value="-1" ${row.choice < 0 ? 'selected' : ''}>${row.options.length ? 'Skip this song' : 'Not found on Spotify'}</option>
             </select>
+            ${
+              searchingRow === i
+                ? `<div class="manual-row">
+                    <input data-search="${i}" value="${escapeHtml(row.title)}" aria-label="Search Spotify for ${escapeHtml(row.title)}" />
+                    <button type="button" class="ghost small" data-go="${i}">Search</button>
+                  </div>`
+                : `<button type="button" class="link" data-open="${i}">${row.choice < 0 ? 'Search Spotify yourself' : 'Not right? Search yourself'}</button>`
+            }
           </div>
           <span class="badge" data-conf="${row.choice < 0 ? 'none' : conf}">${row.choice < 0 && row.options.length ? 'Skipped' : LABEL[conf]}</span>
         </li>`;
@@ -191,9 +206,52 @@ function renderReview() {
     .join('');
 }
 
+async function manualSearch(i: number) {
+  const input = document.querySelector<HTMLInputElement>(`[data-search="${i}"]`);
+  const query = input?.value.trim();
+  if (!query) return;
+  try {
+    setStatus(`Searching for “${query}”…`);
+    const found = await searchAny(query);
+    if (found.length === 0) return setStatus(`Nothing found for “${query}”.`, 'error');
+    const row = rows[i];
+    const known = new Set(row.options.map((o) => o.track.id));
+    const fresh = found.filter((t) => !known.has(t.id)).map((track) => ({ track, confidence: 'manual' as const }));
+    row.options = [...fresh, ...row.options];
+    row.choice = 0;
+    searchingRow = null;
+    setStatus(`Pick the right version for “${row.title}” in the list.`, 'ok');
+    renderReview();
+  } catch (err) {
+    setStatus((err as Error).message, 'error');
+  }
+}
+
+$('results').addEventListener('click', (e) => {
+  const el = e.target as HTMLElement;
+  if (el.dataset.open) {
+    searchingRow = Number(el.dataset.open);
+    renderReview();
+    document.querySelector<HTMLInputElement>(`[data-search="${searchingRow}"]`)?.select();
+  } else if (el.dataset.go) {
+    manualSearch(Number(el.dataset.go));
+  }
+});
+
+$('results').addEventListener('keydown', (e) => {
+  const el = e.target as HTMLElement;
+  if (el.dataset.search && e.key === 'Enter') {
+    e.preventDefault();
+    manualSearch(Number(el.dataset.search));
+  } else if (el.dataset.search && e.key === 'Escape') {
+    searchingRow = null;
+    renderReview();
+  }
+});
+
 $('results').addEventListener('change', (e) => {
   const sel = e.target as HTMLSelectElement;
-  if (!sel.dataset.row) return;
+  if (sel.tagName !== 'SELECT' || !sel.dataset.row) return;
   rows[Number(sel.dataset.row)].choice = Number(sel.value);
   renderReview();
 });
@@ -207,7 +265,7 @@ async function create() {
   try {
     setStatus('Creating playlist…');
     const name = fields().name.value.trim();
-    const playlist = await createPlaylist(name, `Setlist by ${artist!.name}, made with Setlist to Playlist.`);
+    const playlist = await createPlaylist(name, playlistDescription(artist!.name, importedFrom));
     await addItems(playlist.id, uris);
     // Done: swap the buttons so the same playlist can't be created twice.
     btn.hidden = true;
@@ -234,6 +292,8 @@ function startOver() {
     /* ignore */
   }
   rows = [];
+  importedFrom = null;
+  searchingRow = null;
   $('create-btn').hidden = false;
   $('back-btn').hidden = false;
   $('new-btn').hidden = true;

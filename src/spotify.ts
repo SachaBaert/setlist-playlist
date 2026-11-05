@@ -63,6 +63,12 @@ export async function searchTracks(title: string, artistName: string): Promise<T
   return strict.length > 0 ? strict : run(`${title} ${artistName}`);
 }
 
+/** Free-text track search for manual lookups (no artist filter). */
+export async function searchAny(query: string): Promise<Track[]> {
+  const q = new URLSearchParams({ q: query, type: 'track', limit: '10' });
+  return (await api<{ tracks: { items: Track[] } }>(`/search?${q}`)).tracks.items;
+}
+
 export async function createPlaylist(name: string, description: string): Promise<{ id: string; external_urls: { spotify: string } }> {
   return api('/me/playlists', {
     method: 'POST',
