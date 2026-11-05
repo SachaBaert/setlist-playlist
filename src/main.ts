@@ -1,6 +1,7 @@
 import './style.css';
 import { handleRedirect, isLoggedIn, login, logout } from './auth';
 import { parseSetlist, rankCandidates, type Confidence } from './match';
+import { extractSetlistId, fetchSetlist, playlistName, toSetlistText, WORKER_URL } from './setlistfm';
 import { addItems, createPlaylist, searchArtists, searchTracks, type Artist, type Track } from './spotify';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -11,6 +12,7 @@ const DRAFT_KEY = 'setlist_draft';
 
 interface Row {
   title: string;
+  artist: Artist | null; // the artist this row was searched under
   options: { track: Track; confidence: Confidence }[];
   choice: number; // index into options, -1 = skip
 }
@@ -86,21 +88,59 @@ async function runMatching(event: Event) {
   btn.disabled = true;
   try {
     setStatus('Looking up the artist…');
-    const artists = await searchArtists(f.artist.value.trim());
-    const wanted = f.artist.value.trim().toLowerCase();
-    artist = artists.find((a) => a.name.toLowerCase() === wanted) ?? artists[0] ?? null;
+    artist = await resolveArtist(f.artist.value);
     if (!artist) return setStatus(`No artist called "${f.artist.value}" found on Spotify.`, 'error');
 
+    // Covers are searched under their original artist; resolve each name once.
+    const others = new Map<string, Artist | null>();
+    for (const name of new Set(titles.map((t) => t.artist).filter((a): a is string => !!a))) {
+      others.set(name.toLowerCase(), await resolveArtist(name));
+    }
+
     let done = 0;
-    rows = await mapLimit(titles, 3, async (title) => {
-      const results = await searchTracks(title, artist!.name);
+    rows = await mapLimit(titles, 3, async (entry) => {
+      const by = entry.artist ? others.get(entry.artist.toLowerCase()) ?? null : artist;
       setStatus(`Matching songs… ${++done}/${titles.length}`);
-      const options = rankCandidates(title, results, artist!.id).map(({ track, confidence }) => ({ track, confidence }));
-      return { title, options, choice: options.length ? 0 : -1 };
+      if (!by) return { title: entry.title, artist: null, options: [], choice: -1 };
+      const results = await searchTracks(entry.title, by.name);
+      const options = rankCandidates(entry.title, results, by.id).map(({ track, confidence }) => ({ track, confidence }));
+      return { title: entry.title, artist: by, options, choice: options.length ? 0 : -1 };
     });
     setStatus('');
     renderReview();
     show('review');
+  } catch (err) {
+    setStatus((err as Error).message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resolveArtist(name: string): Promise<Artist | null> {
+  const artists = await searchArtists(name.trim());
+  const wanted = name.trim().toLowerCase();
+  return artists.find((a) => a.name.toLowerCase() === wanted) ?? artists[0] ?? null;
+}
+
+// --- setlist.fm import ---
+async function importSetlist() {
+  const id = extractSetlistId($<HTMLInputElement>('import-url').value);
+  if (!id) return setStatus('That doesn’t look like a setlist.fm setlist link.', 'error');
+  const btn = $<HTMLButtonElement>('import-btn');
+  btn.disabled = true;
+  try {
+    setStatus('Fetching setlist…');
+    const setlist = await fetchSetlist(id);
+    const f = fields();
+    f.artist.value = setlist.artist;
+    f.name.value = playlistName(setlist);
+    f.setlist.value = toSetlistText(setlist, $<HTMLInputElement>('include-tapes').checked);
+    saveDraft();
+    const tapes = setlist.songs.filter((s) => s.tape).length;
+    setStatus(
+      `Imported ${setlist.songs.length - tapes} songs` + (tapes ? ` (${tapes} tape${tapes > 1 ? 's' : ''} ${$<HTMLInputElement>('include-tapes').checked ? 'included' : 'skipped'}).` : '.') + ' Check the list, then find tracks.',
+      'ok',
+    );
   } catch (err) {
     setStatus((err as Error).message, 'error');
   } finally {
@@ -139,7 +179,7 @@ function renderReview() {
           <span class="num">${i + 1}</span>
           ${img ? `<img src="${img}" alt="" width="48" height="48" />` : '<span class="noimg"></span>'}
           <div class="info">
-            <span class="requested">${escapeHtml(row.title)}</span>
+            <span class="requested">${escapeHtml(row.title)}${row.artist && row.artist.id !== artist!.id ? ` <span class="by">· ${escapeHtml(row.artist.name)}</span>` : ''}</span>
             <select data-row="${i}" aria-label="Match for ${escapeHtml(row.title)}">
               ${options}
               <option value="-1" ${row.choice < 0 ? 'selected' : ''}>${row.options.length ? 'Skip this song' : 'Not found on Spotify'}</option>
@@ -185,6 +225,8 @@ $('logout-btn').addEventListener('click', () => {
   show('login');
 });
 $('setlist-form').addEventListener('submit', runMatching);
+$('import-btn').addEventListener('click', importSetlist);
+$('import-box').hidden = !WORKER_URL;
 $('create-btn').addEventListener('click', create);
 $('back-btn').addEventListener('click', () => {
   setStatus('');

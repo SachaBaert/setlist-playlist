@@ -21,6 +21,15 @@
       </section>
 
       <section id="form-view" hidden>
+        <div id="import-box" class="import" hidden>
+          <label>Import from setlist.fm <span class="hint">paste the link to a setlist</span>
+            <div class="import-row">
+              <input id="import-url" placeholder="https://www.setlist.fm/setlist/…" autocomplete="off" />
+              <button type="button" class="ghost" id="import-btn">Import</button>
+            </div>
+          </label>
+          <label class="check"><input type="checkbox" id="include-tapes" /> Include intro/outro tapes</label>
+        </div>
         <form id="setlist-form">
           <div class="row">
             <label>Artist
@@ -30,7 +39,7 @@
               <input id="playlist-name" required placeholder="Kneecap live" autocomplete="off" />
             </label>
           </div>
-          <label>Setlist <span class="hint">one song per line, numbering is fine</span>
+          <label>Setlist <span class="hint">one song per line, numbering is fine; for a cover add " | Original artist"</span>
             <textarea id="setlist" rows="12" required placeholder="1. Éire go Deo&#10;2. Smugglers &amp; Scholars&#10;3. Carnival"></textarea>
           </label>
           <div class="actions">

@@ -11,7 +11,13 @@ function track(name: string, album_type = 'album', albumName = 'Fine Art', artis
 describe('parseSetlist', () => {
   it('strips numbering, bullets and empty lines', () => {
     const text = '1. Éire go Deo\n2) Smugglers & Scholars\n\n- Carnival\n• H.O.O.D\n22. THE RECAP  ';
-    expect(parseSetlist(text)).toEqual(['Éire go Deo', 'Smugglers & Scholars', 'Carnival', 'H.O.O.D', 'THE RECAP']);
+    expect(parseSetlist(text).map((e) => e.title)).toEqual(['Éire go Deo', 'Smugglers & Scholars', 'Carnival', 'H.O.O.D', 'THE RECAP']);
+  });
+  it('reads an optional artist after " | " for covers', () => {
+    expect(parseSetlist('3. Bella Ciao | traditional\n4. Fine Art')).toEqual([
+      { title: 'Bella Ciao', artist: 'traditional' },
+      { title: 'Fine Art' },
+    ]);
   });
 });
 

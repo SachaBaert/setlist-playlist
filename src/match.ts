@@ -9,8 +9,13 @@ export interface Candidate {
 
 export type Confidence = 'exact' | 'close' | 'weak' | 'none';
 
-/** Turn pasted text into song titles: one per line, numbering and bullets stripped. */
-export function parseSetlist(text: string): string[] {
+export interface SetlistEntry {
+  title: string;
+  artist?: string; // set for covers: "Song | Original artist"
+}
+
+/** Turn pasted text into entries: one per line, numbering and bullets stripped. */
+export function parseSetlist(text: string): SetlistEntry[] {
   return text
     .split(/\r?\n/)
     .map((line) =>
@@ -19,7 +24,13 @@ export function parseSetlist(text: string): string[] {
         .replace(/\s+/g, ' ')
         .trim(),
     )
-    .filter((line) => line.length > 0);
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const bar = line.lastIndexOf(' | ');
+      if (bar < 0) return { title: line };
+      const artist = line.slice(bar + 3).trim();
+      return artist ? { title: line.slice(0, bar).trim(), artist } : { title: line.slice(0, bar).trim() };
+    });
 }
 
 /** Lowercase, strip accents, punctuation and "feat./with" parts. */
