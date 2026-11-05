@@ -1,2 +1,39 @@
-# setlist-playlist
-Paste a setlist, check the Spotify matches, create the playlist in the exact order.
+# Setlist to Playlist
+
+Paste a setlist, check the Spotify matches, and create a private playlist with the songs in the exact order.
+
+Live: https://sachabaert.github.io/setlist-playlist/
+
+## How it works
+
+- **Login:** Spotify Authorization Code flow with PKCE, entirely in the browser (no client secret, no server).
+- **Matching:** finds the artist first, then searches each title and only accepts tracks by that artist ID. Titles are normalized (accents, punctuation, "feat.") and studio versions are preferred over live/remix versions unless the setlist asks for one. Every match can be changed or skipped before the playlist is created.
+- **Creating:** `POST /me/playlists`, then `POST /playlists/{id}/items` in batches of 100 (Spotify's February 2026 endpoints).
+
+## Development
+
+```bash
+npm install
+npm run dev     # http://127.0.0.1:5173/
+npm test        # unit tests for the matching logic
+```
+
+Spotify only accepts `127.0.0.1`, not `localhost`, as a local redirect URI.
+
+## Spotify app settings
+
+Redirect URIs registered in the developer dashboard:
+
+- `https://sachabaert.github.io/setlist-playlist/`
+- `http://127.0.0.1:5173/`
+
+The app is in Development Mode: only allow-listed accounts (max 5) can log in.
+
+## Deploy
+
+Every push to `main` runs the tests, builds and deploys to GitHub Pages via `.github/workflows/deploy.yml`.
+Pages source must be set to **GitHub Actions** (Settings → Pages).
+
+## Roadmap
+
+- Import a setlist straight from a setlist.fm link (needs a Cloudflare Worker to keep the API key secret).

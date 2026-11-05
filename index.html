@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Setlist to Playlist</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <main id="app">
+      <header>
+        <p class="eyebrow">Setlist → Spotify</p>
+        <h1>Turn a setlist into a playlist</h1>
+        <p class="lede">Paste the songs, check the matches, and get them in your library in the exact order they were played.</p>
+      </header>
+
+      <section id="login-view" hidden>
+        <button id="login-btn" class="primary">Log in with Spotify</button>
+      </section>
+
+      <section id="form-view" hidden>
+        <form id="setlist-form">
+          <div class="row">
+            <label>Artist
+              <input id="artist" required placeholder="Kneecap" autocomplete="off" />
+            </label>
+            <label>Playlist name
+              <input id="playlist-name" required placeholder="Kneecap live" autocomplete="off" />
+            </label>
+          </div>
+          <label>Setlist <span class="hint">one song per line, numbering is fine</span>
+            <textarea id="setlist" rows="12" required placeholder="1. Éire go Deo&#10;2. Smugglers &amp; Scholars&#10;3. Carnival"></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit" class="primary" id="match-btn">Find tracks</button>
+            <button type="button" class="ghost" id="logout-btn">Log out</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="review-view" hidden>
+        <div class="review-head">
+          <h2>Check the matches</h2>
+          <p id="artist-line"></p>
+          <p id="summary"></p>
+        </div>
+        <ol id="results"></ol>
+        <div class="actions">
+          <button id="create-btn" class="primary">Create playlist</button>
+          <button id="back-btn" class="ghost">Edit setlist</button>
+        </div>
+      </section>
+
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
