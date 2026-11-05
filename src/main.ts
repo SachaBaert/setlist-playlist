@@ -209,6 +209,10 @@ async function create() {
     const name = fields().name.value.trim();
     const playlist = await createPlaylist(name, `Setlist by ${artist!.name}, made with Setlist to Playlist.`);
     await addItems(playlist.id, uris);
+    // Done: swap the buttons so the same playlist can't be created twice.
+    btn.hidden = true;
+    $('back-btn').hidden = true;
+    $('new-btn').hidden = false;
     status.dataset.kind = 'ok';
     status.innerHTML = `Done: <a href="${playlist.external_urls.spotify}" target="_blank" rel="noopener">open “${escapeHtml(name)}” in Spotify</a> (${uris.length} songs).`;
   } catch (err) {
@@ -216,6 +220,26 @@ async function create() {
   } finally {
     btn.disabled = false;
   }
+}
+
+function startOver() {
+  const f = fields();
+  f.artist.value = '';
+  f.name.value = '';
+  f.setlist.value = '';
+  $<HTMLInputElement>('import-url').value = '';
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+  rows = [];
+  $('create-btn').hidden = false;
+  $('back-btn').hidden = false;
+  $('new-btn').hidden = true;
+  setStatus('');
+  show('form');
+  window.scrollTo({ top: 0 });
 }
 
 // --- Wiring ---
@@ -228,6 +252,7 @@ $('setlist-form').addEventListener('submit', runMatching);
 $('import-btn').addEventListener('click', importSetlist);
 $('import-box').hidden = !WORKER_URL;
 $('create-btn').addEventListener('click', create);
+$('new-btn').addEventListener('click', startOver);
 $('back-btn').addEventListener('click', () => {
   setStatus('');
   show('form');
