@@ -55,11 +55,20 @@ Round 2 (needs new Worker endpoints, then Sacha pastes the Worker again):
 1. Search concerts by artist instead of pasting a link (setlist.fm `/search/setlists?artistName=`).
 2. "Prepare for a concert" mix: last 5–10 setlists of the current tour, songs ranked by how often they're played, in their usual order.
 
-Statistics (separate page, local parsing only), in this order:
-1. Wrapped-style all-time overview with a chapter per year, plus year playlists (top 30 per year) using the existing playlist code.
-2. Eras timeline, "on this day", forgotten favorites and comebacks, discoveries, skip rate, listening heatmap.
-3. Concert links: songs from a setlist you already know vs. not yet.
-4. Games later (guess the year, higher or lower).
+Statistics (separate page, local parsing only). Sacha wants **all** of these; build in this order:
+
+1. **Foundation:** load the export zip in the browser, normalize streams (play = 30 s or more), flag "on repeat in the background" days separately so they don't distort rankings.
+2. **All-time Wrapped:** scrollable story with a chapter per year (song of the year, discovery of the year, hours listened) plus all-time highlights: first ever stream, most-played songs, biggest day, longest streak, most exploratory year.
+3. **Year playlists:** top 30 per year (2014 onwards), created with the existing playlist code.
+4. **Music timeline / eras:** detect eras automatically (e.g. Twenty One Pilots from 2015, the punk years with PUP and IDLES, KNEECAP from 2025).
+5. **"On this day":** what he listened to on this date 5 and 10 years ago.
+6. **Comebacks and forgotten favorites:** artists played a lot and then not for years (e.g. Fall Out Boy 2016 to 2022), with one-click playlist.
+7. **"Forgotten gems" playlist:** songs played often in one period and then never again.
+8. **Discoveries:** first play per artist and how fast they climbed (KNEECAP: first play Feb 2025, top 10 all-time within two years). Skip rate per artist and a listening heatmap (hour x weekday).
+9. **Concert prep from his own taste:** for a setlist, which songs he already knows and which not yet, so he can listen to the unknown ones first.
+10. **Games:** "Guess the year" (play a song from his history, guess when it was a favorite) and "Higher or lower" (which of two artists he played more).
+
+Reference numbers from a first analysis (for sanity-checking the code): 83,854 audio streams, 2011-12-21 to 2026-11-05, ~3,970 hours; no data for 2013; top artist Twenty One Pilots (~275 h); most-played song "I Really Want to Stay at Your House" (Rosa Walton, 342 plays of 30 s+); 2018 had the most distinct artists (1,573).
 
 ## Working with Sacha
 
