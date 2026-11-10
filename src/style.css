@@ -186,3 +186,15 @@ button.small { padding: 6px 14px; font-size: 13px; flex-shrink: 0; }
   .chapter dl { grid-template-columns: 1fr; }
   .chapter dd { margin-bottom: 8px; }
 }
+
+/* Stats: playlists and eras */
+.draft { border-top: 1px solid var(--line); padding: 10px 0; }
+.draft summary { cursor: pointer; }
+.draft .rank { margin: 10px 0; }
+.draft-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+.draft-actions a { color: var(--accent); }
+.timeline { position: relative; margin: 20px 0 16px; padding-top: 22px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+.timeline .tick { position: absolute; top: 0; height: 100%; border-left: 1px dashed var(--line); padding-left: 3px; font-size: 11px; color: var(--muted); }
+.era-bar { position: relative; height: 20px; background: var(--accent); color: var(--accent-ink); border-radius: 4px; font-size: 11px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.era-bar span { padding-left: 4px; }
+.eras { margin: 0; padding-left: 1.6em; display: grid; gap: 8px; }

@@ -88,3 +88,36 @@ export function fixtureZip(): Uint8Array {
     'Spotify Extended Streaming History/ReadMeFirst_ExtendedStreamingHistory.pdf': strToU8('%PDF fake'),
   });
 }
+
+/**
+ * A three-year history for era detection (2020-01..2022-12), separate from the
+ * main fixture so its numbers stay put. Every month has 20 filler artists with
+ * 3 plays each (~3% share, never an era), plus:
+ * - "Alpha Band": 40 plays/month in 2020 → one era, 2020-01..2020-12.
+ * - "Flash": 60 plays in 2020-06 only → a binge, not an era.
+ * - "Punk One" (30/month) and "Punk Two" (25/month), 2021-03..2022-02 → one shared era.
+ * - "Late Find": 40/month from 2022-07 → an ongoing era.
+ */
+export function erasFixture(): RawStream[] {
+  const out: RawStream[] = [];
+  const month = (y: number, m: number, artist: string, count: number) => {
+    for (let i = 0; i < count; i++) {
+      const t = new Date(Date.UTC(y, m - 1, (i % 28) + 1, 12, i % 60)).toISOString();
+      out.push(s(t, artist, `${artist} Song ${(i % 5) + 1}`, 3 * MIN));
+    }
+  };
+  for (let y = 2020; y <= 2022; y++) {
+    for (let m = 1; m <= 12; m++) {
+      for (let f = 1; f <= 20; f++) month(y, m, `Filler ${f}`, 3);
+      const ym = y * 12 + m;
+      if (y === 2020) month(y, m, 'Alpha Band', 40);
+      if (y === 2020 && m === 6) month(y, m, 'Flash', 60);
+      if (ym >= 2021 * 12 + 3 && ym <= 2022 * 12 + 2) {
+        month(y, m, 'Punk One', 30);
+        month(y, m, 'Punk Two', 25);
+      }
+      if (y === 2022 && m >= 7) month(y, m, 'Late Find', 40);
+    }
+  }
+  return out.sort((a, b) => a.ts.localeCompare(b.ts));
+}

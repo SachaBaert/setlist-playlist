@@ -1,5 +1,5 @@
 import './style.css';
-import { handleRedirect, isLoggedIn, login, logout } from './auth';
+import { handleRedirect, isLoggedIn, login, logout, takeReturnTo } from './auth';
 import { parseSetlist, rankCandidates, type Confidence } from './match';
 import { cleanSearchResults, isoDate, mixDescription, mixName, mixToText, playedSongs, prepareMix } from './concerts';
 import { extractSetlistId, fetchSetlist, playlistDescription, playlistName, searchSetlists, toSetlistText, WORKER_URL, type Setlist } from './setlistfm';
@@ -430,6 +430,8 @@ $('back-btn').addEventListener('click', () => {
 (async () => {
   try {
     await handleRedirect();
+    const back = isLoggedIn() ? takeReturnTo() : null;
+    if (back) return window.location.replace(back);
   } catch (err) {
     setStatus((err as Error).message, 'error');
   }

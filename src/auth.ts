@@ -10,6 +10,7 @@ const SCOPES = 'playlist-modify-private playlist-modify-public';
 const TOKEN_KEY = 'spotify_token';
 const VERIFIER_KEY = 'pkce_verifier';
 const STATE_KEY = 'pkce_state';
+const RETURN_KEY = 'login_return_to';
 
 interface StoredToken {
   access_token: string;
@@ -31,7 +32,9 @@ async function sha256Base64Url(input: string): Promise<string> {
     .replace(/=+$/, '');
 }
 
-export async function login(): Promise<void> {
+/** `returnTo`: a page of this site to go back to after login (the redirect URI is the main page). */
+export async function login(returnTo?: string): Promise<void> {
+  if (returnTo) sessionStorage.setItem(RETURN_KEY, returnTo);
   const verifier = randomString(64);
   const state = randomString(16);
   sessionStorage.setItem(VERIFIER_KEY, verifier);
@@ -69,6 +72,13 @@ async function requestToken(body: Record<string, string>): Promise<void> {
     expires_at: Date.now() + (data.expires_in - 60) * 1000,
   };
   localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
+}
+
+/** After a login started elsewhere (e.g. the stats page), where to go back to. Read once. */
+export function takeReturnTo(): string | null {
+  const to = sessionStorage.getItem(RETURN_KEY);
+  sessionStorage.removeItem(RETURN_KEY);
+  return to && /^[\w-]+\.html$/.test(to) ? to : null;
 }
 
 /** Call once on page load: finishes the login if we're coming back from Spotify. */

@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildHistory, readZip } from '../src/stats/history';
 import { buildWrapped } from '../src/stats/wrapped';
+import { detectEras } from '../src/stats/eras';
+import { yearPlaylists } from '../src/stats/yearlists';
 
 const zip = process.env.STATS_ZIP;
 
@@ -31,6 +33,8 @@ describe.skipIf(!zip)('real export', () => {
       topLoops: h.loops.slice(0, 5).map((l) => `${l.day} ${l.track}: ${l.plays}`),
       longDays: h.longDays.slice(0, 5).map((d) => `${d.day}: ${r(d.hours)} h`),
       years: w.years.map((y) => `${y.year}: ${r(y.hours)} h, ${y.artists} artists, song ${y.topSong?.track}, artist ${y.topArtist?.artist}, discovery ${y.discovery?.artist}`),
+      eras: detectEras(h).map((e) => `${e.from}..${e.ongoing ? 'now' : e.to}: ${e.artists.join(' & ')} (${r(e.hours)} h)`),
+      yearLists: yearPlaylists(h).map((l) => `${l.name}: ${l.songs.slice(0, 3).map((s) => s.track).join(' / ')}`),
       computeMs: ms,
     };
     console.log(JSON.stringify(report, null, 2));

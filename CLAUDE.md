@@ -15,7 +15,7 @@ Vite + TypeScript, no framework, static site on GitHub Pages.
 - `src/setlistfm.ts`: setlist.fm import and concert search via the Worker, playlist name and description. Unit-tested.
 - `src/concerts.ts`: concert search cleanup and the "prepare for a concert" mix (last ≤10 past setlists with songs of the latest tour, rarities under 1/3 of shows dropped, ordered by average position). Unit-tested.
 - `src/main.ts`: UI (form, review screen with dropdowns and manual search, create, "Make another playlist").
-- `stats.html` + `src/stats/`: statistics page (local only). `history.ts` reads the zip (fflate) and normalizes streams, `wrapped.ts` computes the all-time Wrapped, `page.ts` renders. `fixture.ts` is a synthetic export (fake artists, no IPs) for tests; later rounds should build on it. Unit-tested.
+- `stats.html` + `src/stats/`: statistics page (local only). `history.ts` reads the zip (fflate) and normalizes streams, `wrapped.ts` computes the all-time Wrapped, `yearlists.ts` ranks songs and builds playlist drafts (top 30 per year), `eras.ts` detects eras, `page.ts` renders (playlists via the shared `draftHtml` helper; logging in from the stats page returns there via `login('stats.html')`). `fixture.ts` is a synthetic export (fake artists, no IPs) for tests; later rounds should build on it. Unit-tested.
 - `test/real-export.test.ts`: opt-in check against the real export, prints aggregates only: `STATS_ZIP=/path/my_spotify_data.zip npx vitest run test/real-export.test.ts`.
 - `worker/worker.js`: Cloudflare Worker that proxies setlist.fm.
 - `.github/workflows/deploy.yml`: test, build, deploy to Pages on every push to `main`.
@@ -63,7 +63,7 @@ Round 2 (needs new Worker endpoints; they deploy automatically):
 
 Statistics (separate page, local parsing only). Sacha wants **all** of these; build in this order:
 
-Steps 1 and 2 are done (`stats.html`).
+Steps 1–4 are done (`stats.html`). Era thresholds (`ERA_*` in `eras.ts`) are untuned against the real export: check them with the opt-in real-export test, which prints the eras.
 
 1. **Foundation:** load the export zip in the browser, normalize streams (play = 30 s or more), flag "on repeat in the background" days separately so they don't distort rankings.
 2. **All-time Wrapped:** scrollable story with a chapter per year (song of the year, discovery of the year, hours listened) plus all-time highlights: first ever stream, most-played songs, biggest day, longest streak, most exploratory year.
