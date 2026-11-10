@@ -53,7 +53,8 @@ Done: paste/import setlist, matching + review, manual search, setlist.fm credit,
 
 Round 2 (needs new Worker endpoints; they deploy automatically):
 1. Search concerts by artist instead of pasting a link (setlist.fm `/search/setlists?artistName=`).
-2. "Prepare for a concert" mix: last 5–10 setlists of the current tour, songs ranked by how often they're played, in their usual order.
+2. Empty setlists: setlist.fm has many concerts without songs entered (e.g. id `2370a073` returns `songs: []`). Show "No songs on setlist.fm yet for this concert" instead of "Imported 0 songs", and in concert search mark or hide empty setlists.
+3. "Prepare for a concert" mix: last 5–10 setlists of the current tour, songs ranked by how often they're played, in their usual order.
 
 Statistics (separate page, local parsing only). Sacha wants **all** of these; build in this order:
 
