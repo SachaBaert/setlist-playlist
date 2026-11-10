@@ -32,7 +32,8 @@ Commands: `npm install`, `npm run dev` (http://127.0.0.1:5173/), `npm test`, `np
 - Deployed by hand in Cloudflare as `setlist-proxy`: https://setlist-proxy.sacha-baert-88.workers.dev/?id=<setlistId>
 - API key is the Worker secret `SETLISTFM_API_KEY`. Never put it in the repo or the page.
 - CORS only for `https://sachabaert.github.io` and `http://127.0.0.1:5173`. Setlists are cached for a day.
-- **Changing `worker/worker.js` in the repo does not deploy it.** Sacha pastes the code into the Cloudflare editor and clicks Deploy. The deployed version may lag the repo (e.g. the `url` field; the app falls back to the pasted link).
+- **Changing `worker/worker.js` in the repo does not deploy it yet.** Until now Sacha pasted the code into the Cloudflare editor. The deployed version may lag the repo (e.g. the `url` field; the app falls back to the pasted link).
+- **Next step (do this at the start of round 2):** automate it. Sacha stores the repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers") and `CLOUDFLARE_ACCOUNT_ID`. Add `wrangler.toml` (`name = "setlist-proxy"`, `main = "worker/worker.js"`, a fixed `compatibility_date`, `workers_dev = true`) and a workflow `.github/workflows/worker.yml` that runs `cloudflare/wrangler-action` on pushes touching `worker/**` or `wrangler.toml`, plus `workflow_dispatch`. Do not define `SETLISTFM_API_KEY` in wrangler.toml or `vars`: it is a dashboard secret and must survive deploys. Never ask Sacha to paste the token in chat. If the secrets are missing, tell him and fall back to the manual paste.
 - setlist.fm API terms require attribution: playlist descriptions link the setlist, the import box credits setlist.fm.
 
 ## Deploy notes
