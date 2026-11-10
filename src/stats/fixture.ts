@@ -121,3 +121,38 @@ export function erasFixture(): RawStream[] {
   }
   return out.sort((a, b) => a.ts.localeCompare(b.ts));
 }
+
+/** `count` plays of 3 minutes in one month, one a day from the 1st, cycling 5 songs (or one `song`). */
+function monthPlays(out: RawStream[], y: number, m: number, artist: string, count: number, song?: string) {
+  for (let i = 0; i < count; i++) {
+    const t = new Date(Date.UTC(y, m - 1, (i % 28) + 1, 14, i % 60)).toISOString();
+    out.push(s(t, artist, song ?? `${artist} Song ${(i % 5) + 1}`, 3 * MIN));
+  }
+}
+
+/**
+ * Comebacks, forgotten favorites and gems (2016-01..2024-12, separate from the
+ * main fixture). "Steady" plays 5×/month throughout (days 1–5), so every month has data.
+ * - "Old Flame": 10/month in 2016, one stray play in 2019-05, back 10/month 2022-03..08
+ *   → comeback after 62 silent months.
+ * - "Gone Band": 15/month 2017-01..06 (5 songs × 18), never again → forgotten favorite.
+ * - "Brief": "Brief Hit" 12× in 2018-05 → a gem, but too little for a favorite.
+ * - "Recent": "Recent Hit" 15× in 2024-06 → too recent to be forgotten.
+ * Gems (last play ≤ 2022-12, 10+ plays, max 3 per artist): 3 Old Flame, 3 Gone Band, Brief Hit.
+ */
+export function rediscoverFixture(): RawStream[] {
+  const out: RawStream[] = [];
+  for (let y = 2016; y <= 2024; y++) {
+    for (let m = 1; m <= 12; m++) {
+      monthPlays(out, y, m, 'Steady', 5);
+      const ym = y * 12 + m;
+      if (y === 2016) monthPlays(out, y, m, 'Old Flame', 10);
+      if (ym >= 2022 * 12 + 3 && ym <= 2022 * 12 + 8) monthPlays(out, y, m, 'Old Flame', 10);
+      if (y === 2017 && m <= 6) monthPlays(out, y, m, 'Gone Band', 15);
+    }
+  }
+  out.push(s('2019-05-20T10:00:00Z', 'Old Flame', 'Old Flame Song 1', 3 * MIN));
+  monthPlays(out, 2018, 5, 'Brief', 12, 'Brief Hit');
+  monthPlays(out, 2024, 6, 'Recent', 15, 'Recent Hit');
+  return out.sort((a, b) => a.ts.localeCompare(b.ts));
+}

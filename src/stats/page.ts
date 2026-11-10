@@ -1,9 +1,11 @@
 // Statistics page UI. Thin: reads files locally, calls the pure modules, renders.
 import '../style.css';
-import { buildHistory, parseJsonFile, readZip, DAY_CAP, LONG_DAY_HOURS, LOOP_PLAYS, type History, type RawStream } from './history';
+import { buildHistory, parseJsonFile, readZip, DEFAULT_TZ, DAY_CAP, LONG_DAY_HOURS, LOOP_PLAYS, type History, type RawStream } from './history';
 import { buildWrapped, type SongStat, type Wrapped } from './wrapped';
 import { yearPlaylists, YEAR_TOP, type PlaylistDraft } from './yearlists';
 import { detectEras, monthIndex, type Era } from './eras';
+import { onThisDay, todayIn, type DayLook } from './onthisday';
+import { rediscover, SILENCE_MONTHS, type Rediscover } from './comebacks';
 import { isLoggedIn, login } from '../auth';
 import { addItems, createPlaylist } from '../spotify';
 
@@ -105,6 +107,44 @@ function erasHtml(eras: Era[], first: string, last: string): string {
     </section>`;
 }
 
+function onThisDayHtml(looks: DayLook[]): string {
+  if (!looks.length) return '';
+  return `
+    <section class="chapter">
+      <h2>On this day</h2>
+      ${looks
+        .map(
+          (l) => `
+      <h3>${l.yearsAgo} years ago${l.exact ? '' : `, closest day with music`}: ${date(l.day)}</h3>
+      <p class="muted">${h(l.hours)} · ${plays(l.plays)}${l.artists.length ? ` · mostly ${l.artists.map(esc).join(', ')}` : ''}</p>
+      <ol class="rank">${l.topSongs.map((s) => `<li>${song({ ...s, hours: 0 })}</li>`).join('')}</ol>`,
+        )
+        .join('')}
+    </section>`;
+}
+
+function rediscoverHtml(r: Rediscover): string {
+  if (!r.comebacks.length && !r.forgotten.length && !r.gems) return '';
+  const years = SILENCE_MONTHS / 12;
+  return `
+    <section class="chapter">
+      <h2>Comebacks and forgotten favorites</h2>
+      ${
+        r.comebacks.length
+          ? `<h3>Comebacks</h3><p class="muted">Artists you played a lot, then hardly at all for ${years}+ years, then again.</p>
+      ${r.comebacks.slice(0, 10).map((c) => draftHtml(c.playlist, `<strong>${esc(c.artist)}</strong> <span class="by">${month(c.before.from)} – ${month(c.before.to)}, gone ${Math.round(c.silentMonths / 12)} years, back ${month(c.back)}</span>`)).join('')}`
+          : ''
+      }
+      ${
+        r.forgotten.length
+          ? `<h3>Forgotten favorites</h3><p class="muted">Artists you played a lot and not in the last ${years}+ years.</p>
+      ${r.forgotten.slice(0, 10).map((f) => draftHtml(f.playlist, `<strong>${esc(f.artist)}</strong> <span class="by">${n0(f.plays)} plays, ${month(f.from)} – ${month(f.last)}</span>`)).join('')}`
+          : ''
+      }
+      ${r.gems ? `<h3>Forgotten gems</h3><p class="muted">Songs you played a lot once and never again (at most 3 per artist).</p>${draftHtml(r.gems, `<strong>${r.gems.songs.length} songs</strong> <span class="by">starting with ${esc(r.gems.songs[0].track)}</span>`)}` : ''}
+    </section>`;
+}
+
 function render(w: Wrapped, hist: History) {
   const t = w.totals;
   const first = w.firstStream;
@@ -149,7 +189,9 @@ function render(w: Wrapped, hist: History) {
       </dl>
     </section>
 
+    ${onThisDayHtml(onThisDay(hist, todayIn(DEFAULT_TZ)))}
     ${erasHtml(detectEras(hist), t.first, t.last)}
+    ${rediscoverHtml(rediscover(hist))}
     ${yearsHtml(yearPlaylists(hist))}
 
     <details class="chapter">
