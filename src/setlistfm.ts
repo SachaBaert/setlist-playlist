@@ -11,7 +11,10 @@ export interface SetlistSong {
 }
 
 export interface Setlist {
+  id?: string; // missing in responses cached before round 2
   artist: string;
+  artistUrl?: string; // setlist.fm artist page
+  tour?: string;
   date: string; // dd-MM-yyyy
   venue: string;
   city: string;
@@ -32,6 +35,20 @@ export async function fetchSetlist(id: string): Promise<Setlist> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `Import failed (${res.status})`);
   return data as Setlist;
+}
+
+export interface SearchPage {
+  total: number;
+  page: number;
+  perPage: number;
+  setlists: Setlist[];
+}
+
+export async function searchSetlists(artist: string, page = 1): Promise<SearchPage> {
+  const res = await fetch(`${WORKER_URL}?artist=${encodeURIComponent(artist)}&p=${page}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `Search failed (${res.status})`);
+  return data as SearchPage;
 }
 
 /** Text for the setlist box. Covers get "| Original artist" so they're searched under that artist. */

@@ -22,7 +22,17 @@
 
       <section id="form-view" hidden>
         <div id="import-box" class="import" hidden>
-          <label>Import from setlist.fm <span class="hint">paste the link to a setlist</span>
+          <label>Find a concert <span class="hint">search setlist.fm by artist</span>
+            <div class="import-row">
+              <input id="concert-artist" placeholder="Kneecap" autocomplete="off" />
+              <button type="button" class="ghost" id="concert-btn">Search</button>
+            </div>
+          </label>
+          <div id="concert-results" hidden>
+            <button type="button" class="ghost" id="mix-btn">Prepare for a concert: mix of the latest tour</button>
+            <ul id="concert-list" class="concerts"></ul>
+          </div>
+          <label>Or paste a setlist.fm link <span class="hint">to import one setlist</span>
             <div class="import-row">
               <input id="import-url" placeholder="https://www.setlist.fm/setlist/…" autocomplete="off" />
               <button type="button" class="ghost" id="import-btn">Import</button>

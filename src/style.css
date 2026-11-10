@@ -154,3 +154,13 @@ button.link:hover { color: var(--ink); }
 .manual-row input { padding: 6px 8px; font-size: 13px; }
 button.small { padding: 6px 14px; font-size: 13px; flex-shrink: 0; }
 .badge[data-conf='manual'] { color: var(--accent); }
+
+/* Concert search */
+#concert-results { display: grid; gap: 8px; }
+#mix-btn { justify-self: start; }
+.concerts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 320px; overflow-y: auto; }
+.concert { width: 100%; display: grid; grid-template-columns: 6.5em 1fr auto; gap: 12px; align-items: baseline; text-align: left; padding: 8px 12px; background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-weight: 400; cursor: pointer; }
+.concert:hover:not(:disabled) { border-color: var(--ink); }
+.concert:disabled { opacity: 0.5; cursor: default; }
+.concert .when { font-variant-numeric: tabular-nums; color: var(--muted); }
+.concert .count { font-size: 13px; color: var(--muted); }

@@ -1,7 +1,8 @@
-// Cloudflare Worker: proxies one setlist.fm setlist to the app.
+// Cloudflare Worker: proxies setlist.fm to the app.
+//   ?id=<setlistId>        one setlist (cached for a day)
+//   ?artist=<name>&p=<n>   concert search by artist, songs included (cached for 6 hours)
 // - Keeps the setlist.fm API key secret (set as the secret SETLISTFM_API_KEY).
 // - Adds CORS headers for the app's own origins only.
-// - Caches each setlist for a day, so repeat imports don't use API quota.
 
 const ALLOWED_ORIGINS = ['https://sachabaert.github.io', 'http://127.0.0.1:5173'];
 
@@ -16,16 +17,17 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405, cors);
 
-    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const params = new URL(request.url).searchParams;
+    if (params.has('artist')) return searchByArtist(params, env, ctx, cors);
+
+    const id = params.get('id') ?? '';
     if (!/^[0-9a-f]{4,12}$/i.test(id)) return json({ error: 'Missing or invalid setlist id' }, 400, cors);
 
     const cacheKey = new Request(`https://setlist-cache.internal/${id}`);
     const cached = await caches.default.match(cacheKey);
     if (cached) return withCors(cached, cors);
 
-    const upstream = await fetch(`https://api.setlist.fm/rest/1.0/setlist/${id}`, {
-      headers: { 'x-api-key': env.SETLISTFM_API_KEY, Accept: 'application/json', 'Accept-Language': 'en' },
-    });
+    const upstream = await setlistfm(`/setlist/${id}`, env);
     if (upstream.status === 404) return json({ error: 'Setlist not found on setlist.fm' }, 404, cors);
     if (!upstream.ok) return json({ error: `setlist.fm returned ${upstream.status}` }, 502, cors);
 
@@ -34,6 +36,40 @@ export default {
     return withCors(response, cors);
   },
 };
+
+async function searchByArtist(params, env, ctx, cors) {
+  const artist = (params.get('artist') ?? '').trim();
+  const page = Number(params.get('p') ?? '1');
+  if (!artist || artist.length > 100) return json({ error: 'Missing or invalid artist' }, 400, cors);
+  if (!Number.isInteger(page) || page < 1 || page > 5) return json({ error: 'Invalid page' }, 400, cors);
+
+  const cacheKey = new Request(`https://setlist-cache.internal/search/${encodeURIComponent(artist.toLowerCase())}/${page}`);
+  const cached = await caches.default.match(cacheKey);
+  if (cached) return withCors(cached, cors);
+
+  const upstream = await setlistfm(`/search/setlists?artistName=${encodeURIComponent(artist)}&p=${page}`, env);
+  let body;
+  if (upstream.status === 404) body = { total: 0, page, perPage: 20, setlists: [] }; // setlist.fm: 404 = no results
+  else if (!upstream.ok) return json({ error: `setlist.fm returned ${upstream.status}` }, 502, cors);
+  else {
+    const data = await upstream.json();
+    body = {
+      total: data.total ?? 0,
+      page: data.page ?? page,
+      perPage: data.itemsPerPage ?? 20,
+      setlists: (data.setlist ?? []).map(simplify),
+    };
+  }
+  const response = json(body, 200, { 'Cache-Control': 'public, max-age=21600' });
+  ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
+  return withCors(response, cors);
+}
+
+function setlistfm(path, env) {
+  return fetch(`https://api.setlist.fm/rest/1.0${path}`, {
+    headers: { 'x-api-key': env.SETLISTFM_API_KEY, Accept: 'application/json', 'Accept-Language': 'en' },
+  });
+}
 
 // Only what the app needs: artist, event info and songs in played order.
 function simplify(data) {
@@ -50,7 +86,10 @@ function simplify(data) {
     }
   }
   return {
+    id: data.id ?? '',
     artist: data.artist?.name ?? '',
+    artistUrl: data.artist?.url ?? '',
+    tour: data.tour?.name ?? '',
     date: data.eventDate ?? '', // dd-MM-yyyy
     venue: data.venue?.name ?? '',
     city: data.venue?.city?.name ?? '',

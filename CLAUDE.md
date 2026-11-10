@@ -12,7 +12,8 @@ Vite + TypeScript, no framework, static site on GitHub Pages.
 - `src/auth.ts`: Spotify login, Authorization Code + PKCE, token refresh. Holds the Client ID and redirect URIs.
 - `src/spotify.ts`: thin Web API client (search, create playlist, add items, 429 retry).
 - `src/match.ts`: pure matching logic (parse setlist, normalize titles, score/rank candidates). Unit-tested.
-- `src/setlistfm.ts`: setlist.fm import via the Worker, playlist name and description. Unit-tested.
+- `src/setlistfm.ts`: setlist.fm import and concert search via the Worker, playlist name and description. Unit-tested.
+- `src/concerts.ts`: concert search cleanup and the "prepare for a concert" mix (last ≤10 past setlists with songs of the latest tour, rarities under 1/3 of shows dropped, ordered by average position). Unit-tested.
 - `src/main.ts`: UI (form, review screen with dropdowns and manual search, create, "Make another playlist").
 - `worker/worker.js`: Cloudflare Worker that proxies setlist.fm.
 - `.github/workflows/deploy.yml`: test, build, deploy to Pages on every push to `main`.
@@ -29,7 +30,7 @@ Commands: `npm install`, `npm run dev` (http://127.0.0.1:5173/), `npm test`, `np
 
 ## setlist.fm Worker
 
-- Deployed by hand in Cloudflare as `setlist-proxy`: https://setlist-proxy.sacha-baert-88.workers.dev/?id=<setlistId>
+- Deployed in Cloudflare as `setlist-proxy`: `https://setlist-proxy.sacha-baert-88.workers.dev/?id=<setlistId>` (one setlist, cached a day) and `?artist=<name>&p=<1-5>` (search, songs included, cached 6 h; setlist.fm's 404 = no results is returned as an empty list).
 - API key is the Worker secret `SETLISTFM_API_KEY`. Never put it in the repo or the page.
 - CORS only for `https://sachabaert.github.io` and `http://127.0.0.1:5173`. Setlists are cached for a day.
 - **Deploys are automated:** `.github/workflows/worker.yml` runs `wrangler deploy` (config in `wrangler.toml`) on every push to `main` that touches `worker/**` or `wrangler.toml`, and via "Run workflow". It uses the repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers", expires 2027-11-10) and `CLOUDFLARE_ACCOUNT_ID`. Never ask Sacha to paste the token in chat. Never define `SETLISTFM_API_KEY` in wrangler.toml or `vars`: it is a dashboard secret and survives deploys.
@@ -49,7 +50,7 @@ Export format: `Streaming_History_Audio_YYYY.json` arrays with `ts` (UTC), `ms_p
 
 ## Roadmap
 
-Done: paste/import setlist, matching + review, manual search, setlist.fm credit, "Make another playlist".
+Done: paste/import setlist, matching + review, manual search, setlist.fm credit, "Make another playlist", concert search by artist (empty/upcoming concerts shown greyed out), "prepare for a concert" mix, "No songs on setlist.fm yet" message.
 
 Round 2 (needs new Worker endpoints; they deploy automatically):
 1. Search concerts by artist instead of pasting a link (setlist.fm `/search/setlists?artistName=`).

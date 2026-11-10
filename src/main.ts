@@ -1,7 +1,8 @@
 import './style.css';
 import { handleRedirect, isLoggedIn, login, logout } from './auth';
 import { parseSetlist, rankCandidates, type Confidence } from './match';
-import { extractSetlistId, fetchSetlist, playlistDescription, playlistName, toSetlistText, WORKER_URL } from './setlistfm';
+import { cleanSearchResults, isoDate, mixDescription, mixName, mixToText, playedSongs, prepareMix } from './concerts';
+import { extractSetlistId, fetchSetlist, playlistDescription, playlistName, searchSetlists, toSetlistText, WORKER_URL, type Setlist } from './setlistfm';
 import { addItems, createPlaylist, searchAny, searchArtists, searchTracks, type Artist, type Track } from './spotify';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -20,6 +21,8 @@ interface Row {
 let rows: Row[] = [];
 let artist: Artist | null = null;
 let importedFrom: string | null = null; // setlist.fm URL, for attribution
+let description: string | null = null; // set for prep mixes; otherwise built from importedFrom
+let concerts: { query: string; setlists: Setlist[]; pages: number; more: boolean } | null = null;
 let searchingRow: number | null = null; // row with the manual search box open
 
 function show(view: keyof typeof views) {
@@ -45,7 +48,7 @@ const fields = () => ({
 function saveDraft() {
   const f = fields();
   try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ artist: f.artist.value, name: f.name.value, setlist: f.setlist.value, importedFrom }));
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ artist: f.artist.value, name: f.name.value, setlist: f.setlist.value, importedFrom, description }));
   } catch {
     /* storage unavailable, not critical */
   }
@@ -60,6 +63,7 @@ function loadDraft() {
     f.name.value = d.name ?? '';
     f.setlist.value = d.setlist ?? '';
     importedFrom = d.importedFrom ?? null;
+    description = d.description ?? null;
   } catch {
     /* ignore */
   }
@@ -137,15 +141,104 @@ async function importSetlist() {
     const setlist = await fetchSetlist(id);
     // Older cached Worker responses have no url; fall back to the pasted link.
     const pasted = $<HTMLInputElement>('import-url').value.trim();
-    importedFrom = setlist.url || (/^https?:\/\//.test(pasted) ? pasted : null);
+    applySetlist(setlist, setlist.url || (/^https?:\/\//.test(pasted) ? pasted : null));
+  } catch (err) {
+    setStatus((err as Error).message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function applySetlist(setlist: Setlist, source: string | null) {
+  const songs = playedSongs(setlist).length;
+  if (setlist.songs.length === 0) return setStatus('No songs on setlist.fm yet for this concert.', 'error');
+  importedFrom = source;
+  description = null;
+  const includeTapes = $<HTMLInputElement>('include-tapes').checked;
+  const f = fields();
+  f.artist.value = setlist.artist;
+  f.name.value = playlistName(setlist);
+  f.setlist.value = toSetlistText(setlist, includeTapes);
+  saveDraft();
+  const tapes = setlist.songs.length - songs;
+  setStatus(
+    `Imported ${songs} songs` + (tapes ? ` (${tapes} tape${tapes > 1 ? 's' : ''} ${includeTapes ? 'included' : 'skipped'}).` : '.') + ' Check the list, then find tracks.',
+    'ok',
+  );
+}
+
+// --- Concert search and prep mix ---
+const today = () => new Date().toLocaleDateString('sv-SE'); // yyyy-mm-dd, local time
+
+async function loadPage(query: string, page: number) {
+  const res = await searchSetlists(query, page);
+  const all = [...(concerts?.query === query ? concerts.setlists : []), ...res.setlists];
+  concerts = { query, setlists: cleanSearchResults(query, all), pages: page, more: res.page * res.perPage < res.total };
+}
+
+async function searchConcerts() {
+  const query = $<HTMLInputElement>('concert-artist').value.trim();
+  if (!query) return setStatus('Type an artist to search for.', 'error');
+  const btn = $<HTMLButtonElement>('concert-btn');
+  btn.disabled = true;
+  try {
+    setStatus(`Searching setlist.fm for ${query}…`);
+    concerts = null;
+    await loadPage(query, 1);
+    renderConcerts();
+    setStatus(concerts!.setlists.length ? 'Pick a concert, or make a prep mix of the latest tour.' : `No concerts found for “${query}”.`, concerts!.setlists.length ? 'ok' : 'error');
+  } catch (err) {
+    setStatus((err as Error).message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderConcerts() {
+  const list = concerts?.setlists ?? [];
+  $('concert-results').hidden = list.length === 0;
+  const now = today();
+  $('concert-list').innerHTML = list
+    .map((s, i) => {
+      const n = playedSongs(s).length;
+      const upcoming = isoDate(s.date) > now;
+      const note = upcoming ? 'Upcoming' : n ? `${n} songs` : 'No songs yet';
+      const place = [s.venue, s.city].filter(Boolean).map(escapeHtml).join(', ');
+      return `<li><button type="button" class="concert" data-concert="${i}" ${n ? '' : 'disabled'}>
+          <span class="when">${isoDate(s.date)}</span>
+          <span class="where">${place}${s.tour ? ` <span class="by">· ${escapeHtml(s.tour)}</span>` : ''}</span>
+          <span class="count">${note}</span>
+        </button></li>`;
+    })
+    .join('');
+}
+
+async function makeMix() {
+  if (!concerts) return;
+  const btn = $<HTMLButtonElement>('mix-btn');
+  btn.disabled = true;
+  try {
+    let mix = prepareMix(concerts.setlists, today());
+    // Fetch older pages while the tour may have more shows (setlist.fm pages hold 20 concerts).
+    while (concerts.more && concerts.pages < 3 && (!mix || (mix.shows.length < 10 && concerts.setlists.at(-1)!.tour === mix.tour))) {
+      setStatus('Fetching older concerts…');
+      await loadPage(concerts.query, concerts.pages + 1);
+      mix = prepareMix(concerts.setlists, today());
+    }
+    renderConcerts();
+    if (!mix) return setStatus('None of these concerts have songs on setlist.fm yet.', 'error');
+    importedFrom = mix.shows[0].artistUrl || mix.shows[0].url;
+    description = mixDescription(mix);
     const f = fields();
-    f.artist.value = setlist.artist;
-    f.name.value = playlistName(setlist);
-    f.setlist.value = toSetlistText(setlist, $<HTMLInputElement>('include-tapes').checked);
+    f.artist.value = mix.artist;
+    f.name.value = mixName(mix);
+    f.setlist.value = mixToText(mix);
     saveDraft();
-    const tapes = setlist.songs.filter((s) => s.tape).length;
+    const shows = mix.shows.length;
     setStatus(
-      `Imported ${setlist.songs.length - tapes} songs` + (tapes ? ` (${tapes} tape${tapes > 1 ? 's' : ''} ${$<HTMLInputElement>('include-tapes').checked ? 'included' : 'skipped'}).` : '.') + ' Check the list, then find tracks.',
+      `Prep mix from ${shows === 1 ? 'the latest show' : `the last ${shows} shows`}${mix.tour ? ` of ${mix.tour}` : ''}: ${mix.songs.length} songs, in their usual order` +
+        (shows >= 3 ? `, rarities played at fewer than ${Math.ceil(shows / 3)} shows left out` : '') +
+        '. Check the list, then find tracks.',
       'ok',
     );
   } catch (err) {
@@ -154,6 +247,13 @@ async function importSetlist() {
     btn.disabled = false;
   }
 }
+
+$('concert-list').addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-concert]');
+  if (!el || !concerts) return;
+  const setlist = concerts.setlists[Number(el.dataset.concert)];
+  applySetlist(setlist, setlist.url || null);
+});
 
 // --- Review screen ---
 const LABEL: Record<Confidence | 'manual', string> = { exact: 'Exact', close: 'Close', weak: 'Check', none: 'Not found', manual: 'Picked' };
@@ -265,7 +365,7 @@ async function create() {
   try {
     setStatus('Creating playlist…');
     const name = fields().name.value.trim();
-    const playlist = await createPlaylist(name, playlistDescription(artist!.name, importedFrom));
+    const playlist = await createPlaylist(name, description ?? playlistDescription(artist!.name, importedFrom));
     await addItems(playlist.id, uris);
     // Done: swap the buttons so the same playlist can't be created twice.
     btn.hidden = true;
@@ -293,6 +393,7 @@ function startOver() {
   }
   rows = [];
   importedFrom = null;
+  description = null;
   searchingRow = null;
   $('create-btn').hidden = false;
   $('back-btn').hidden = false;
@@ -310,6 +411,14 @@ $('logout-btn').addEventListener('click', () => {
 });
 $('setlist-form').addEventListener('submit', runMatching);
 $('import-btn').addEventListener('click', importSetlist);
+$('concert-btn').addEventListener('click', searchConcerts);
+$('concert-artist').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    searchConcerts();
+  }
+});
+$('mix-btn').addEventListener('click', makeMix);
 $('import-box').hidden = !WORKER_URL;
 $('create-btn').addEventListener('click', create);
 $('new-btn').addEventListener('click', startOver);
