@@ -164,3 +164,25 @@ button.small { padding: 6px 14px; font-size: 13px; flex-shrink: 0; }
 .concert:disabled { opacity: 0.5; cursor: default; }
 .concert .when { font-variant-numeric: tabular-nums; color: var(--muted); }
 .concert .count { font-size: 13px; color: var(--muted); }
+
+/* Statistics page */
+.eyebrow a { color: inherit; text-decoration: none; }
+.chapter { padding: 24px 0; border-top: 1px solid var(--line); }
+.chapter.hero { border-top: 0; padding-top: 0; }
+.chapter h2 { font-size: 32px; }
+.chapter h3 { margin: 20px 0 8px; font: 500 15px 'Space Grotesk', system-ui, sans-serif; }
+.chapter dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 16px 0 0; }
+.chapter dt { color: var(--muted); }
+.chapter dd { margin: 0; }
+.chapter summary { cursor: pointer; font-family: 'Space Grotesk', system-ui, sans-serif; font-weight: 500; }
+.muted { color: var(--muted); margin: 0; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 8px 0 16px; }
+.stats-grid div { display: grid; color: var(--muted); font-size: 14px; }
+.big { font: 700 clamp(28px, 6vw, 40px)/1.1 'Space Grotesk', system-ui, sans-serif; color: var(--ink); }
+.rank { margin: 0; padding-left: 1.6em; display: grid; gap: 4px; }
+.rank .num { margin-left: 6px; }
+@media (max-width: 560px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .chapter dl { grid-template-columns: 1fr; }
+  .chapter dd { margin-bottom: 8px; }
+}

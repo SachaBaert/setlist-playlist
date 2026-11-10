@@ -39,3 +39,7 @@ Pages source must be set to **GitHub Actions** (Settings → Pages).
 Paste a setlist.fm link to fill in artist, playlist name and songs. Tapes are skipped unless you tick the box; covers are written as `Song | Original artist` and searched under that artist.
 
 The page can't call setlist.fm directly (no CORS, and the API key must stay secret), so it goes through a Cloudflare Worker: `worker/worker.js`, deployed as `setlist-proxy`. The key is stored as the Worker secret `SETLISTFM_API_KEY`; each setlist is cached for a day.
+
+## Listening stats
+
+`stats.html` turns a Spotify Extended Streaming History export into an all-time Wrapped: a chapter per year plus all-time highlights. The zip is read in the browser (File API + [fflate](https://github.com/101arrowz/fflate)); nothing is uploaded. Songs left on repeat in the background are capped so they don't distort the rankings.

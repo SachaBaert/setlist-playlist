@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Listening stats · Setlist to Playlist</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <main id="app">
+      <header>
+        <p class="eyebrow"><a href="./">Setlist → Spotify</a> · Stats</p>
+        <h1>Your all-time Wrapped</h1>
+        <p class="lede">Load your Spotify Extended Streaming History. It is read on this device only; nothing is uploaded.</p>
+      </header>
+
+      <section id="load-view" class="import">
+        <label>Export file <span class="hint">my_spotify_data.zip, or the Streaming_History_Audio_*.json files</span>
+          <input id="file" type="file" accept=".zip,.json,application/zip,application/json" multiple />
+        </label>
+        <p class="credit">Request it at Spotify → Account → Privacy → “Extended streaming history”.</p>
+      </section>
+
+      <p id="status" role="status"></p>
+      <div id="wrapped"></div>
+    </main>
+    <script type="module" src="/src/stats/page.ts"></script>
+  </body>
+</html>

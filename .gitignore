@@ -1,3 +1,7 @@
 node_modules
 dist
 .DS_Store
+# Personal Spotify exports: never commit (contain IP addresses)
+*.zip
+my_spotify_data*
+Streaming_History_*.json
