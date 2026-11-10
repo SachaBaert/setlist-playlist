@@ -1,0 +1,7 @@
+# Cloudflare Worker that proxies setlist.fm (see worker/worker.js).
+# Deployed by .github/workflows/worker.yml. The setlist.fm API key is a
+# dashboard secret (SETLISTFM_API_KEY); never define it here, deploys keep it.
+name = "setlist-proxy"
+main = "worker/worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
