@@ -76,6 +76,12 @@ Steps 1–7 are done (`stats.html`). Era thresholds (`ERA_*` in `eras.ts`) and t
 9. **Concert prep from his own taste:** for a setlist, which songs he already knows and which not yet, so he can listen to the unknown ones first.
 10. **Games:** "Guess the year" (play a song from his history, guess when it was a favorite) and "Higher or lower" (which of two artists he played more).
 
+**Discover (requested 2026-11-11, build after the statistics steps or when asked):** a playlist of music Sacha has never heard that fits his taste.
+- Spotify recommendations and related artists are not available to dev-mode apps, so taste comes from **Last.fm** (`artist.getSimilar`, `artist.getTopTracks`) via new Worker endpoints. The key is the Worker secret `LASTFM_API_KEY` (Sacha adds it in the Cloudflare dashboard; never in the repo or chat). Cache Last.fm responses in the Worker.
+- Seeds: his top artists from the export (weighted, recent years by default; options: last year, all time, a detected era). Score candidate artists by summed similarity x seed weight.
+- "Never heard" = artist has zero streams in his export (checked in the browser). Optional "adventure" slider: one or two similarity hops.
+- Tracks: Last.fm top tracks per new artist, matched on Spotify with the existing matching code, also excluding any `spotify_track_uri` in his history. Max 2 per artist, 30 total. Reuse the review screen and playlist creation; description says which seed artist each pick came from.
+
 Reference numbers from a first analysis (for sanity-checking the code): 83,854 audio streams, 2011-12-21 to 2026-11-05, ~3,970 hours; no data from 2012-02-04 to 2014-06-16 (a gap in the export itself; show it as "no data", never as zero listening); top artist Twenty One Pilots (~275 h); most-played song "I Really Want to Stay at Your House" (Rosa Walton, 342 plays of 30 s+); 2018 had the most distinct artists (1,573). All verified by the code (2026-11-10). 25 entries have no track metadata, so 83,829 music streams, 68,406 plays. Weighted, "I Really Want to Stay at Your House" drops out of the top 5 (199 of its plays were on two loop days); top song becomes "Stressed Out" (185 weighted, 251 raw). 97 loop days flagged (biggest: "The Contract", 158× on 2025-06-13); longest raw day 2017-09-24 (20.7 h, a soundtrack looping); weighted biggest day 2015-03-26 (11 h); longest streak 28 days (2025-04-27 to 05-24).
 
 ## Working with Sacha
