@@ -8,9 +8,9 @@ import { onThisDay, todayIn, type DayLook } from './onthisday';
 import { rediscover, SILENCE_MONTHS, type Rediscover } from './comebacks';
 import { artistKey, discoverDescription, heardUris, knownArtists, pickTracks, rankNewArtists, seedArtists, steppingStones, PER_ARTIST, SEED_COUNT, TOTAL, type SeedRange, type Similar } from './discover';
 import { getAccessToken, isLoggedIn, login, TRACKER_RESULT_KEY } from '../auth';
-import { coverage, fromListens, latest, mergeStreams, slim, type CachedStream } from './cache';
+import { coverage, forUpload, fromListens, latest, mergeStreams, slim, type CachedStream } from './cache';
 import { forgetCache, loadCache, saveCache } from './store';
-import { stopTracker, trackedListens, TrackerError, type TrackerStatus } from '../tracker';
+import { deleteHistory, downloadHistory, historyMeta, stopTracker, trackedListens, TrackerError, uploadHistory, type HistoryMeta, type TrackerStatus } from '../tracker';
 import { rankCandidates } from '../match';
 import { fetchSimilar, fetchTopTracks } from '../lastfm';
 import { saveHandoff, type HandoffRow } from '../handoff';
@@ -331,7 +331,7 @@ function render(w: Wrapped, hist: History) {
 let cached: CachedStream[] = [];
 const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-function show(streams: CachedStream[], from: 'cache' | 'file' | 'tracker') {
+function show(streams: CachedStream[], from: 'cache' | 'file' | 'tracker' | 'online') {
   out.innerHTML = '';
   drafts.clear();
   const hist = buildHistory(streams);
@@ -342,11 +342,87 @@ function show(streams: CachedStream[], from: 'cache' | 'file' | 'tracker') {
   const tracked = c.tracked
     ? ` Includes ${n0(c.tracked)} tracked ${c.tracked === 1 ? 'play' : 'plays'} from ${date(c.trackedFrom!.slice(0, 10))} (hours estimated from song length${c.exportEnd ? `; nothing between the export’s end on ${date(c.exportEnd.slice(0, 10))} and the start of tracking` : ''}).`
     : '';
-  const src = { cache: 'Loaded from this device', file: 'Loaded and saved on this device', tracker: 'Updated with tracked plays' }[from];
+  const src = { cache: 'Loaded from this device', file: 'Loaded and saved on this device', tracker: 'Updated with tracked plays', online: 'Loaded from your online copy' }[from];
   setStatus(`${src}: ${n0(hist.streams.length)} streams, ${hist.streams[0].day} to ${hist.streams.at(-1)!.day}.${tracked}`, 'ok');
-  $('cache-actions').hidden = false;
-  $('cache-note').textContent = 'Your history is saved in this browser.';
+  renderCacheUi();
 }
+
+// --- Online copy (export plays only, on the Worker, owner-only) ---
+let online: HistoryMeta | null = null;
+let onlineNote = '';
+const cacheActions = $('cache-actions');
+
+function renderCacheUi() {
+  const local = cached.length > 0;
+  const canUpload = isLoggedIn() && forUpload(cached).length > 0;
+  cacheActions.hidden = !local && !online && !onlineNote;
+  const where = online ? `Saved in this browser and online (updated ${when(online.savedAt)}), so other browsers can load it.` : local ? 'Saved in this browser.' : '';
+  cacheActions.innerHTML = `<span class="muted">${esc(onlineNote || where)}</span>
+    ${local ? '<button class="small ghost" id="forget-btn">Forget my data</button>' : ''}
+    ${online ? '<button class="small ghost" id="delete-online-btn">Delete online copy</button>' : canUpload ? '<button class="small ghost" id="upload-btn">Save online copy</button>' : ''}`;
+  onlineNote = '';
+}
+
+async function uploadOnline() {
+  const up = forUpload(cached);
+  const end = coverage(cached).exportEnd;
+  if (!isLoggedIn() || !up.length || !end) return;
+  try {
+    online = await uploadHistory(await getAccessToken(), up, end);
+  } catch (err) {
+    onlineNote = `Saved in this browser, but not online: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  renderCacheUi();
+}
+
+/** If the online copy has more than this browser (newer export, or a fresh browser), load it. */
+async function pullOnline() {
+  if (!isLoggedIn()) return;
+  try {
+    const token = await getAccessToken();
+    online = await historyMeta(token);
+    const localEnd = coverage(cached).exportEnd;
+    if (online && (!localEnd || online.exportEnd > localEnd || online.streams > forUpload(cached).length)) {
+      setStatus('Loading your history from your online copy…');
+      const merged = mergeStreams(cached, await downloadHistory(token));
+      show(merged, 'online');
+      await store(merged);
+    }
+  } catch (err) {
+    if (!(err instanceof TrackerError && err.status === 401)) onlineNote = `Online copy unavailable: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  renderCacheUi();
+}
+
+cacheActions.addEventListener('click', async (e) => {
+  const el = e.target as HTMLElement;
+  if (el.closest('#upload-btn')) {
+    onlineNote = 'Saving online…';
+    renderCacheUi();
+    return uploadOnline();
+  }
+  if (el.closest('#delete-online-btn')) {
+    if (!confirm('Delete the online copy of your history? This browser keeps its own copy.')) return;
+    try {
+      await deleteHistory(await getAccessToken());
+      online = null;
+      onlineNote = 'Online copy deleted.';
+    } catch (err) {
+      onlineNote = err instanceof Error ? err.message : String(err);
+    }
+    return renderCacheUi();
+  }
+  if (el.closest('#forget-btn')) {
+    const extra = online ? ' The online copy stays until you delete it too.' : '';
+    if (!confirm(`Remove your saved listening history from this browser?${extra} Tracked plays stay on the Worker until you stop tracking.`)) return;
+    await forgetCache();
+    cached = [];
+    loaded = null;
+    out.innerHTML = '';
+    setStatus('Forgotten. Nothing is saved in this browser any more.', 'ok');
+    renderCacheUi();
+  }
+});
 
 async function store(streams: CachedStream[]) {
   cached = streams;
@@ -366,21 +442,13 @@ $('file').addEventListener('change', async (e) => {
     const merged = mergeStreams(cached, slim(await readFiles(files)));
     show(merged, 'file');
     await store(merged);
+    await uploadOnline();
     void syncTracker();
   } catch (err) {
     setStatus(err instanceof Error ? err.message : String(err), 'error');
   }
 });
 
-$('forget-btn').addEventListener('click', async () => {
-  if (!confirm('Remove your saved listening history from this browser? Tracked plays stay on the Worker until you stop tracking.')) return;
-  await forgetCache();
-  cached = [];
-  loaded = null;
-  out.innerHTML = '';
-  $('cache-actions').hidden = true;
-  setStatus('Forgotten. Nothing is saved in this browser any more.', 'ok');
-});
 
 const trackerNote = $('tracker-status');
 const trackerActions = $('tracker-actions');
@@ -448,6 +516,7 @@ $('tracker').addEventListener('click', async (e) => {
     await new Promise((r) => setTimeout(r, 30));
     show(saved, 'cache');
   }
+  await pullOnline();
   await syncTracker();
   if (result && result !== 'ok') trackerNote.textContent = `Could not start tracking: ${result}`;
   else if (result === 'ok') trackerNote.textContent = `Tracking started. ${trackerNote.textContent}`;

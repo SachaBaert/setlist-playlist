@@ -4,15 +4,25 @@
 //   POST /tracker/stop                     deletes the stored token (Bearer: owner's access token)
 //   GET  /tracker/status                   tracking on/off, last run (Bearer)
 //   GET  /tracker/listens?since=<ms>       tracked plays after `since` (Bearer)
+//   GET    /tracker/history?meta=1         {savedAt, streams, exportEnd, bytes} of the stored export copy (Bearer)
+//   GET    /tracker/history                the copy itself: gzipped JSON, made in the browser (Bearer)
+//   PUT    /tracker/history?streams=&exportEnd=  replace it (Bearer); body = gzipped JSON
+//   DELETE /tracker/history                delete it (Bearer)
 //   cron (hourly)                          refresh token, GET /me/player/recently-played, append to KV
 // KV (binding TRACKER): `tracker:token` = {refresh_token, cursor, startedAt, lastRun, lastCount, lastError},
 // `listens:YYYY-MM` (UTC month) = [{ts, track, artist, album, uri, ms}] sorted by ts, deduped on ts.
+// `history:export` = the export copy (only listening fields, slimmed in the browser; never IPs or countries),
+// `history:meta` = its {savedAt, streams, exportEnd, bytes}. The Worker never unzips it.
 // No ms_played or skips from Spotify here: every listen is a play of 30 s+, `ms` is the track length.
 
 export const TOKEN_KEY = 'tracker:token';
 const API = 'https://api.spotify.com/v1';
 const SCOPE = 'user-read-recently-played';
 const OWNER_CHECK_MS = 5 * 60_000;
+export const HISTORY_KEY = 'history:export';
+export const HISTORY_META = 'history:meta';
+/** KV values max out at 25 MiB; the gzipped history is ~3-5 MB. */
+export const HISTORY_MAX_BYTES = 24 * 1024 * 1024;
 
 /** Recently-played items → listens (music only). */
 export function fromRecentlyPlayed(items) {
@@ -186,5 +196,36 @@ export async function handleTracker(request, env, cors, fetchFn = fetch, now = D
     }
     return json({ listens, ...status(await env.TRACKER.get(TOKEN_KEY, 'json')) }, 200, cors);
   }
+  if (url.pathname === '/tracker/history') return history(request, url, env, cors, now);
   return json({ error: 'Not found' }, 404, cors);
+}
+
+async function history(request, url, env, cors, now) {
+  if (request.method === 'GET') {
+    const meta = await env.TRACKER.get(HISTORY_META, 'json');
+    if (!meta) return json({ error: 'No history stored' }, 404, cors);
+    if (url.searchParams.has('meta')) return json(meta, 200, cors);
+    const body = await env.TRACKER.get(HISTORY_KEY, 'arrayBuffer');
+    if (!body) return json({ error: 'No history stored' }, 404, cors);
+    return new Response(body, { headers: { 'Content-Type': 'application/gzip', 'Cache-Control': 'no-store', ...cors } });
+  }
+  if (request.method === 'PUT') {
+    const streams = Number(url.searchParams.get('streams'));
+    const exportEnd = url.searchParams.get('exportEnd') ?? '';
+    if (!Number.isInteger(streams) || streams < 1 || Number.isNaN(Date.parse(exportEnd))) return json({ error: 'Missing streams or exportEnd' }, 400, cors);
+    const body = await request.arrayBuffer();
+    if (body.byteLength > HISTORY_MAX_BYTES) return json({ error: 'History too large to store' }, 413, cors);
+    const head = new Uint8Array(body.slice(0, 2));
+    if (head[0] !== 0x1f || head[1] !== 0x8b) return json({ error: 'Body must be gzipped' }, 400, cors);
+    const meta = { savedAt: new Date(now).toISOString(), streams, exportEnd: new Date(Date.parse(exportEnd)).toISOString(), bytes: body.byteLength };
+    await env.TRACKER.put(HISTORY_KEY, body);
+    await env.TRACKER.put(HISTORY_META, JSON.stringify(meta));
+    return json(meta, 200, cors);
+  }
+  if (request.method === 'DELETE') {
+    await env.TRACKER.delete(HISTORY_KEY);
+    await env.TRACKER.delete(HISTORY_META);
+    return json({ deleted: true }, 200, cors);
+  }
+  return json({ error: 'Method not allowed' }, 405, cors);
 }

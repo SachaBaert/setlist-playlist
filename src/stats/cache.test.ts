@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildHistory } from './history';
-import { coverage, fromListens, latest, mergeStreams, slim } from './cache';
+import { coverage, forUpload, fromListens, latest, mergeStreams, slim } from './cache';
 import { fixtureStreams, recentlyPlayedFixture } from './fixture';
 // @ts-expect-error plain JS Worker module
 import { fromRecentlyPlayed } from '../../worker/tracker.js';
@@ -59,5 +59,17 @@ describe('coverage and latest', () => {
     const merged = mergeStreams(exported(), tracked());
     expect(coverage(merged)).toEqual({ exportEnd: '2019-07-01T10:30:00.000Z', tracked: 3, trackedFrom: '2019-07-02T12:00:00.000Z', trackedTo: '2019-08-01T00:10:00.000Z' });
     expect(latest(merged)).toBe(Date.parse('2019-08-01T00:10:00Z'));
+  });
+});
+
+describe('forUpload', () => {
+  it('sends export plays only: no tracked plays, no podcast stubs, no extra fields', () => {
+    const merged = mergeStreams(slim(fixtureStreams().map((r) => ({ ...r, ip_addr: '192.0.2.1', conn_country: 'BE' }))), tracked());
+    const up = forUpload(merged);
+    expect(up).toHaveLength(fixtureStreams().length - 1); // minus the podcast
+    expect(up.some((s) => s.source === 'tracker')).toBe(false);
+    expect(new Set(up.flatMap((s) => Object.keys(s)))).toEqual(
+      new Set(['ts', 'ms_played', 'master_metadata_track_name', 'master_metadata_album_artist_name', 'master_metadata_album_album_name', 'spotify_track_uri', 'skipped']),
+    );
   });
 });

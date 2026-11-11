@@ -49,7 +49,8 @@ Commands: `npm install`, `npm run dev` (http://127.0.0.1:5173/), `npm test`, `np
 
 ## Privacy
 
-Sacha's Spotify Extended Streaming History (2011–2026, ~84k streams, ~70 MB) contains `ip_addr` and `conn_country` per stream. **Never commit it, upload it to the project, or send it anywhere.** Statistics features must parse the export in the browser (File API, unzip client-side) so nothing leaves his computer.
+Sacha's Spotify Extended Streaming History (2011–2026, ~84k streams, ~70 MB) contains `ip_addr` and `conn_country` per stream. **Never commit it, upload it to the project, or send the zip or any of its other fields anywhere.** Statistics features must parse the export in the browser (File API, unzip client-side).
+- Exception (Sacha's choice, 2026-11-11): the *slimmed* listening plays (`forUpload()` in `cache.ts`: ts, ms_played, track, artist, album, track URI, skipped; music only) are gzipped in the browser and stored on the Worker (`PUT /tracker/history`, KV `history:export` + `history:meta`, owner-only like the tracker) so every browser can load them. Never add IPs, countries, platform or other fields to that upload. The stats page uploads after loading an export, pulls the copy when it has a later export end or more streams than the browser, and has "Save online copy" / "Delete online copy" next to "Forget my data".
 
 Counting rules (in `history.ts`): a play is 30 s+; in rankings a song counts at most 10 times a day (`DAY_CAP`, continuous, no cliff); 20+ plays of one song in a day is flagged as a background loop; days over 12 h raw are flagged, scaled to 12 h and left out of "biggest day". Day boundaries use Europe/Brussels. Hours shown as "listened" are raw; rankings use the weighted numbers.
 

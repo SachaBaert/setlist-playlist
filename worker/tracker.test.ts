@@ -1,20 +1,21 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain JS Worker module
-import { handleTracker, mergeListens, monthOf, runTracker, TOKEN_KEY } from './tracker.js';
+import { handleTracker, mergeListens, monthOf, runTracker, HISTORY_KEY, TOKEN_KEY } from './tracker.js';
+import { gzipSync, gunzipSync, strFromU8, strToU8 } from 'fflate';
 import { recentlyPlayedFixture } from '../src/stats/fixture';
 
 const OWNER = '118489613';
 const NOW = Date.parse('2019-08-01T01:17:00Z');
 
 function fakeKV() {
-  const data = new Map<string, string>();
+  const data = new Map<string, string | ArrayBuffer>();
   return {
     data,
     async get(k: string, type?: string) {
       const v = data.get(k);
-      return v === undefined ? null : type === 'json' ? JSON.parse(v) : v;
+      return v === undefined ? null : type === 'json' ? JSON.parse(v as string) : v;
     },
-    async put(k: string, v: string) {
+    async put(k: string, v: string | ArrayBuffer) {
       data.set(k, v);
     },
     async delete(k: string) {
@@ -73,11 +74,11 @@ describe('POST /tracker/start', () => {
     const res = await handleTracker(req('POST', '/tracker/start', { refresh_token: 'given' }), e, {}, fetchFn, NOW);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ tracking: true, lastCount: 4, lastError: null });
-    const record = JSON.parse(e.TRACKER.data.get(TOKEN_KEY)!);
+    const record = JSON.parse(<string>e.TRACKER.data.get(TOKEN_KEY)!);
     expect(record.refresh_token).toBe('refresh-1');
     expect(record.cursor).toBe(Date.parse('2019-08-01T00:10:00Z'));
-    expect(JSON.parse(e.TRACKER.data.get('listens:2019-07')!).map((l: { track: string }) => l.track)).toEqual(['Long Track 6', 'Echo One', 'Echo One']);
-    expect(JSON.parse(e.TRACKER.data.get('listens:2019-08')!)).toEqual([
+    expect(JSON.parse(<string>e.TRACKER.data.get('listens:2019-07')!).map((l: { track: string }) => l.track)).toEqual(['Long Track 6', 'Echo One', 'Echo One']);
+    expect(JSON.parse(<string>e.TRACKER.data.get('listens:2019-08')!)).toEqual([
       { ts: '2019-08-01T00:10:00.000Z', track: 'Tiny Intro', artist: 'Mock Orchestra', album: 'Mock Orchestra album', uri: 'spotify:track:fakeMockOrchestraTinyIntro', ms: 12_000 },
     ]);
   });
@@ -102,21 +103,21 @@ describe('runTracker (cron)', () => {
     const s = fakeSpotify();
     await handleTracker(req('POST', '/tracker/start', { refresh_token: 'given' }), e, {}, s.fetchFn, NOW);
     // Pretend the cursor is older, so the fixture's newest plays come back again.
-    const rec = JSON.parse(e.TRACKER.data.get(TOKEN_KEY)!);
+    const rec = JSON.parse(<string>e.TRACKER.data.get(TOKEN_KEY)!);
     e.TRACKER.data.set(TOKEN_KEY, JSON.stringify({ ...rec, cursor: Date.parse('2019-07-02T12:00:00Z') }));
     await runTracker(e, s.fetchFn, NOW + 3_600_000);
-    const after = JSON.parse(e.TRACKER.data.get(TOKEN_KEY)!);
+    const after = JSON.parse(<string>e.TRACKER.data.get(TOKEN_KEY)!);
     expect(after.refresh_token).toBe('refresh-2');
     expect(after.lastCount).toBe(0); // "Echo One" 12:05 and "Tiny Intro" were already stored
     expect(s.calls.at(-1)).toContain(`after=${Date.parse('2019-07-02T12:00:00Z')}`);
-    expect(JSON.parse(e.TRACKER.data.get('listens:2019-07')!)).toHaveLength(3);
+    expect(JSON.parse(<string>e.TRACKER.data.get('listens:2019-07')!)).toHaveLength(3);
   });
 
   it('stops when the token was revoked', async () => {
     const e = env();
     e.TRACKER.data.set(TOKEN_KEY, JSON.stringify({ refresh_token: 'old', cursor: null }));
     await runTracker(e, fakeSpotify({ revoked: true }).fetchFn, NOW);
-    expect(JSON.parse(e.TRACKER.data.get(TOKEN_KEY)!)).toMatchObject({ refresh_token: '', lastError: expect.stringContaining('invalid_grant') });
+    expect(JSON.parse(<string>e.TRACKER.data.get(TOKEN_KEY)!)).toMatchObject({ refresh_token: '', lastError: expect.stringContaining('invalid_grant') });
   });
 });
 
@@ -136,8 +137,41 @@ describe('reading and stopping', () => {
 
     const stop = await handleTracker(req('POST', '/tracker/stop'), e, {}, s.fetchFn, NOW);
     expect(await stop.json()).toMatchObject({ tracking: false });
-    expect(JSON.parse(e.TRACKER.data.get(TOKEN_KEY)!).refresh_token).toBe('');
+    expect(JSON.parse(<string>e.TRACKER.data.get(TOKEN_KEY)!).refresh_token).toBe('');
     await runTracker(e, s.fetchFn, NOW); // no token: nothing happens
     expect(e.TRACKER.data.get('listens:2019-08')).toBeDefined();
+  });
+});
+
+describe('history copy', () => {
+  const gz = (o: unknown) => gzipSync(strToU8(JSON.stringify(o)));
+  const put = (body: BodyInit, q = 'streams=2&exportEnd=2019-07-01T10:30:00Z', token = 'browser') =>
+    new Request(`https://worker.test/tracker/history?${q}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body });
+
+  it('stores, describes, returns and deletes the gzipped copy for the owner', async () => {
+    const e = env();
+    const { fetchFn } = fakeSpotify();
+    const streams = [{ ts: '2019-07-01T10:30:00Z', master_metadata_track_name: 'Long Track 13' }, { ts: '2014-03-01T09:00:00Z', master_metadata_track_name: 'Overture' }];
+    const saved = await handleTracker(put(gz(streams)), e, {}, fetchFn, NOW);
+    expect(saved.status).toBe(200);
+    const meta = { savedAt: new Date(NOW).toISOString(), streams: 2, exportEnd: '2019-07-01T10:30:00.000Z', bytes: gz(streams).byteLength };
+    expect(await saved.json()).toEqual(meta);
+
+    expect(await (await handleTracker(req('GET', '/tracker/history?meta=1'), e, {}, fetchFn, NOW)).json()).toEqual(meta);
+    const body = new Uint8Array(await (await handleTracker(req('GET', '/tracker/history'), e, {}, fetchFn, NOW)).arrayBuffer());
+    expect(JSON.parse(strFromU8(gunzipSync(body)))).toEqual(streams);
+
+    await handleTracker(req('DELETE', '/tracker/history'), e, {}, fetchFn, NOW);
+    expect(e.TRACKER.data.has(HISTORY_KEY)).toBe(false);
+    expect((await handleTracker(req('GET', '/tracker/history?meta=1'), e, {}, fetchFn, NOW)).status).toBe(404);
+  });
+
+  it('refuses strangers, plain JSON and missing metadata', async () => {
+    const e = env();
+    const { fetchFn } = fakeSpotify();
+    expect((await handleTracker(put(gz([]), undefined, 'nope'), e, {}, fetchFn, NOW)).status).toBe(401);
+    expect((await handleTracker(put('[{"ip_addr":"x"}]'), e, {}, fetchFn, NOW)).status).toBe(400);
+    expect((await handleTracker(put(gz([]), 'streams=0'), e, {}, fetchFn, NOW)).status).toBe(400);
+    expect(e.TRACKER.data.size).toBe(0);
   });
 });

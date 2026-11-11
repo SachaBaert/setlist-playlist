@@ -94,3 +94,8 @@ export function coverage(raw: CachedStream[]): Coverage {
     trackedTo: tracked.at(-1)?.ts ?? null,
   };
 }
+
+/** What goes to the Worker's copy: export plays only (tracked ones are there already), no podcast stubs. */
+export function forUpload(raw: CachedStream[]): CachedStream[] {
+  return raw.filter((s) => s.source !== 'tracker' && s.master_metadata_track_name && s.master_metadata_album_artist_name);
+}
