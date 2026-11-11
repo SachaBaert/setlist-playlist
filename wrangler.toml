@@ -16,3 +16,8 @@ SPOTIFY_CLIENT_ID = "bde1387dee44433ab2311f114c7eae93"
 # Live history tracker: hourly, off the hour.
 [triggers]
 crons = ["23 * * * *"]
+
+# Live history tracker storage (namespace "setlist-tracker", created by .github/workflows/kv-namespace.yml).
+[[kv_namespaces]]
+binding = "TRACKER"
+id = "86db255c74a040f8a848e15ce3eafb47"
