@@ -5,3 +5,8 @@ name = "setlist-proxy"
 main = "worker/worker.js"
 compatibility_date = "2025-01-01"
 workers_dev = true
+
+# Not secret: the only Spotify account the live history tracker serves.
+# Keep secrets (SETLISTFM_API_KEY, LASTFM_API_KEY) out of [vars]; they live in the dashboard.
+[vars]
+OWNER_SPOTIFY_ID = "118489613"
