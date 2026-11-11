@@ -156,3 +156,47 @@ export function rediscoverFixture(): RawStream[] {
   monthPlays(out, 2024, 6, 'Recent', 15, 'Recent Hit');
   return out.sort((a, b) => a.ts.localeCompare(b.ts));
 }
+
+/**
+ * Discover (2019-01..2025-12, separate from the main fixture), with fake Last.fm
+ * data in `discoverSimilar`. Seeds by window:
+ * - "Old Fave": 30/month in 2019 only → a seed for "all time", not for "recent".
+ * - "Now Band": 20/month 2023-01..2025-12; "Also Now": 10/month in 2025 → recent and last-year seeds.
+ * - "The Heard Once": one 10 s stream in 2024 → known (any stream counts), never suggested.
+ * - "Now Band" song "Now Band Song 1" loops 40× on 2025-03-01 (weighted, so it doesn't swamp "Also Now").
+ */
+export function discoverFixture(): RawStream[] {
+  const out: RawStream[] = [];
+  for (let y = 2019; y <= 2025; y++) {
+    for (let m = 1; m <= 12; m++) {
+      if (y === 2019) monthPlays(out, y, m, 'Old Fave', 30);
+      if (y >= 2023) monthPlays(out, y, m, 'Now Band', 20);
+      if (y === 2025) monthPlays(out, y, m, 'Also Now', 10);
+    }
+  }
+  for (let i = 0; i < 40; i++) out.push(s(new Date(Date.UTC(2025, 2, 1, 8, 0) + i * 3 * MIN).toISOString(), 'Now Band', 'Now Band Song 1', 3 * MIN));
+  out.push(s('2024-04-02T10:00:00Z', 'The Heard Once', 'Once', 10_000));
+  return out.sort((a, b) => a.ts.localeCompare(b.ts));
+}
+
+/** Fake Last.fm artist.getSimilar answers for discoverFixture's artists. */
+export const discoverSimilar: Record<string, { name: string; match: number }[]> = {
+  'Now Band': [
+    { name: 'Also Now', match: 1 }, // known
+    { name: 'Heard Once', match: 0.9 }, // known, spelled without "The"
+    { name: 'Fresh One', match: 0.8 },
+    { name: 'Shared Find', match: 0.5 },
+  ],
+  'Also Now': [
+    { name: 'Shared Find', match: 0.9 },
+    { name: 'Fresh Two', match: 0.4 },
+    { name: 'Now Band', match: 1 },
+  ],
+  'Old Fave': [{ name: 'Old School', match: 1 }],
+  // Second hop
+  'Fresh One': [
+    { name: 'Far Away', match: 1 },
+    { name: 'Shared Find', match: 1 }, // already hop 1
+  ],
+  'Shared Find': [{ name: 'Further Out', match: 0.5 }],
+};

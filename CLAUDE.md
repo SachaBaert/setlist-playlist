@@ -15,9 +15,9 @@ Vite + TypeScript, no framework, static site on GitHub Pages.
 - `src/setlistfm.ts`: setlist.fm import and concert search via the Worker, playlist name and description. Unit-tested.
 - `src/concerts.ts`: concert search cleanup and the "prepare for a concert" mix (last ≤10 past setlists with songs of the latest tour, rarities under 1/3 of shows dropped, ordered by average position). Unit-tested.
 - `src/main.ts`: UI (form, review screen with dropdowns and manual search, create, "Make another playlist").
-- `stats.html` + `src/stats/`: statistics page (local only). `history.ts` reads the zip (fflate) and normalizes streams, `wrapped.ts` computes the all-time Wrapped, `yearlists.ts` ranks songs and builds playlist drafts (top 30 per year), `eras.ts` detects eras, `onthisday.ts` (5 and 10 years ago, nearest day within ±3 if silent), `comebacks.ts` (comebacks, forgotten favorites, forgotten gems; `rediscoverFixture()` in fixture.ts), `page.ts` renders (playlists via the shared `draftHtml` helper; logging in from the stats page returns there via `login('stats.html')`). `fixture.ts` is a synthetic export (fake artists, no IPs) for tests; later rounds should build on it. Unit-tested.
+- `stats.html` + `src/stats/`: statistics page (local only). `history.ts` reads the zip (fflate) and normalizes streams, `wrapped.ts` computes the all-time Wrapped, `yearlists.ts` ranks songs and builds playlist drafts (top 30 per year), `eras.ts` detects eras, `onthisday.ts` (5 and 10 years ago, nearest day within ±3 if silent), `comebacks.ts` (comebacks, forgotten favorites, forgotten gems; `rediscoverFixture()` in fixture.ts), `page.ts` renders (playlists via the shared `draftHtml` helper; logging in from the stats page returns there via `login('stats.html')`). `discover.ts` (Discover: seeds, Last.fm candidate scoring, track picks, description; orchestration in `page.ts`, which hands the result to the main page's review screen via `src/handoff.ts`; Last.fm client in `src/lastfm.ts`). `fixture.ts` is a synthetic export (fake artists, no IPs) for tests; later rounds should build on it. Unit-tested.
 - `test/real-export.test.ts`: opt-in check against the real export, prints aggregates only: `STATS_ZIP=/path/my_spotify_data.zip npx vitest run test/real-export.test.ts`.
-- `worker/worker.js`: Cloudflare Worker that proxies setlist.fm.
+- `worker/worker.js`: Cloudflare Worker that proxies setlist.fm and Last.fm.
 - `.github/workflows/deploy.yml`: test, build, deploy to Pages on every push to `main`.
 
 Commands: `npm install`, `npm run dev` (http://127.0.0.1:5173/), `npm test`, `npm run build`.
@@ -33,7 +33,8 @@ Commands: `npm install`, `npm run dev` (http://127.0.0.1:5173/), `npm test`, `np
 ## setlist.fm Worker
 
 - Deployed in Cloudflare as `setlist-proxy`: `https://setlist-proxy.sacha-baert-88.workers.dev/?id=<setlistId>` (one setlist, cached a day) and `?artist=<name>&p=<1-5>` (search, songs included, cached 6 h; setlist.fm's 404 = no results is returned as an empty list).
-- API key is the Worker secret `SETLISTFM_API_KEY`. Never put it in the repo or the page.
+- Last.fm: `?similar=<artist>` (artist.getSimilar, top 30, `{artist, similar:[{name, match}]}`) and `?toptracks=<artist>` (artist.getTopTracks, top 10, `{artist, tracks:[{name, playcount}]}`), autocorrect on, cached a week; unknown artist = empty list; 503 if `LASTFM_API_KEY` is missing.
+- API keys are the Worker secrets `SETLISTFM_API_KEY` and `LASTFM_API_KEY` (dashboard secrets, never in wrangler.toml). Never put it in the repo or the page.
 - CORS only for `https://sachabaert.github.io` and `http://127.0.0.1:5173`. Setlists are cached for a day.
 - **Deploys are automated:** `.github/workflows/worker.yml` runs `wrangler deploy` (config in `wrangler.toml`) on every push to `main` that touches `worker/**` or `wrangler.toml`, and via "Run workflow". It uses the repo secrets `CLOUDFLARE_API_TOKEN` (template "Edit Cloudflare Workers", expires 2027-11-10) and `CLOUDFLARE_ACCOUNT_ID`. Never ask Sacha to paste the token in chat. Never define `SETLISTFM_API_KEY` in wrangler.toml or `vars`: it is a dashboard secret and survives deploys.
 - setlist.fm API terms require attribution: playlist descriptions link the setlist, the import box credits setlist.fm.
@@ -76,7 +77,7 @@ Steps 1–7 are done (`stats.html`). Era thresholds (`ERA_*` in `eras.ts`) and t
 9. **Concert prep from his own taste:** for a setlist, which songs he already knows and which not yet, so he can listen to the unknown ones first.
 10. **Games:** "Guess the year" (play a song from his history, guess when it was a favorite) and "Higher or lower" (which of two artists he played more).
 
-**Discover (requested 2026-11-11, build after the statistics steps or when asked):** a playlist of music Sacha has never heard that fits his taste.
+**Discover (built 2026-11-11, untuned against the real export):** section on the stats page; "Find new music" matches on Spotify, then opens the main page's review screen with the picks (rows show "· Artist, via Seed"). Adventure = 2 hops: second-hop artists (not directly similar to any seed) first, hop 1 fills up. Thresholds in `discover.ts` (`SEED_COUNT`, `RECENT_YEARS`, `HOP_VIA`) and `DISCOVER_TRIES`/`TRACK_TRIES` in `page.ts`. A Spotify artist must match the Last.fm name exactly (`artistKey`) or it's skipped. Original spec: a playlist of music Sacha has never heard that fits his taste.
 - Spotify recommendations and related artists are not available to dev-mode apps, so taste comes from **Last.fm** (`artist.getSimilar`, `artist.getTopTracks`) via new Worker endpoints. The key is the Worker secret `LASTFM_API_KEY` (Sacha adds it in the Cloudflare dashboard; never in the repo or chat). Cache Last.fm responses in the Worker.
 - Seeds: his top artists from the export (weighted, recent years by default; options: last year, all time, a detected era). Score candidate artists by summed similarity x seed weight.
 - "Never heard" = artist has zero streams in his export (checked in the browser). Optional "adventure" slider: one or two similarity hops.

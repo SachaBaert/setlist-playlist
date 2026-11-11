@@ -198,3 +198,8 @@ button.small { padding: 6px 14px; font-size: 13px; flex-shrink: 0; }
 .era-bar { position: relative; height: 20px; background: var(--accent); color: var(--accent-ink); border-radius: 4px; font-size: 11px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .era-bar span { padding-left: 4px; }
 .eras { margin: 0; padding-left: 1.6em; display: grid; gap: 8px; }
+
+/* Discover */
+.discover-form { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin: 16px 0 0; }
+.discover-form input[type='range'] { padding: 0; accent-color: var(--accent); }
+@media (max-width: 560px) { .discover-form { grid-template-columns: 1fr; } }

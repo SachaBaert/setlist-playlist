@@ -1,7 +1,9 @@
-// Cloudflare Worker: proxies setlist.fm to the app.
+// Cloudflare Worker: proxies setlist.fm and Last.fm to the app.
 //   ?id=<setlistId>        one setlist (cached for a day)
 //   ?artist=<name>&p=<n>   concert search by artist, songs included (cached for 6 hours)
-// - Keeps the setlist.fm API key secret (set as the secret SETLISTFM_API_KEY).
+//   ?similar=<artist>      Last.fm artist.getSimilar, top 30 (cached for a week)
+//   ?toptracks=<artist>    Last.fm artist.getTopTracks, top 10 (cached for a week)
+// - Keeps the API keys secret (dashboard secrets SETLISTFM_API_KEY and LASTFM_API_KEY).
 // - Adds CORS headers for the app's own origins only.
 
 const ALLOWED_ORIGINS = ['https://sachabaert.github.io', 'http://127.0.0.1:5173'];
@@ -19,6 +21,8 @@ export default {
 
     const params = new URL(request.url).searchParams;
     if (params.has('artist')) return searchByArtist(params, env, ctx, cors);
+    if (params.has('similar')) return lastfm('similar', params.get('similar'), env, ctx, cors);
+    if (params.has('toptracks')) return lastfm('toptracks', params.get('toptracks'), env, ctx, cors);
 
     const id = params.get('id') ?? '';
     if (!/^[0-9a-f]{4,12}$/i.test(id)) return json({ error: 'Missing or invalid setlist id' }, 400, cors);
@@ -61,6 +65,50 @@ async function searchByArtist(params, env, ctx, cors) {
     };
   }
   const response = json(body, 200, { 'Cache-Control': 'public, max-age=21600' });
+  ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
+  return withCors(response, cors);
+}
+
+// Last.fm, reduced to what Discover needs. Unknown artist (error 6) = empty list.
+const LASTFM = {
+  similar: {
+    method: 'artist.getsimilar',
+    limit: 30,
+    pick: (d) => ({
+      artist: d.similarartists?.['@attr']?.artist ?? '',
+      similar: (d.similarartists?.artist ?? []).map((a) => ({ name: a.name, match: Number(a.match) || 0 })),
+    }),
+  },
+  toptracks: {
+    method: 'artist.gettoptracks',
+    limit: 10,
+    pick: (d) => ({
+      artist: d.toptracks?.['@attr']?.artist ?? '',
+      tracks: (d.toptracks?.track ?? []).map((t) => ({ name: t.name, playcount: Number(t.playcount) || 0 })),
+    }),
+  },
+};
+
+async function lastfm(kind, rawArtist, env, ctx, cors) {
+  const artist = (rawArtist ?? '').trim();
+  if (!artist || artist.length > 100) return json({ error: 'Missing or invalid artist' }, 400, cors);
+  if (!env.LASTFM_API_KEY) return json({ error: 'Last.fm is not configured on the Worker' }, 503, cors);
+  const spec = LASTFM[kind];
+
+  const cacheKey = new Request(`https://setlist-cache.internal/lastfm/${kind}/${encodeURIComponent(artist.toLowerCase())}`);
+  const cached = await caches.default.match(cacheKey);
+  if (cached) return withCors(cached, cors);
+
+  const q = new URLSearchParams({ method: spec.method, artist, autocorrect: '1', limit: String(spec.limit), format: 'json', api_key: env.LASTFM_API_KEY });
+  const upstream = await fetch(`https://ws.audioscrobbler.com/2.0/?${q}`, { headers: { 'User-Agent': 'setlist-playlist (sachabaert.github.io)' } });
+  const data = await upstream.json().catch(() => null);
+  let body;
+  if (data?.error === 6) body = spec.pick({}); // artist not found
+  else if (!upstream.ok || !data || data.error) return json({ error: `Last.fm returned ${data?.error ?? upstream.status}` }, 502, cors);
+  else body = spec.pick(data);
+  if (!body.artist) body.artist = artist;
+
+  const response = json(body, 200, { 'Cache-Control': 'public, max-age=604800' });
   ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
   return withCors(response, cors);
 }

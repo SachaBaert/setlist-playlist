@@ -6,8 +6,12 @@ import { yearPlaylists, YEAR_TOP, type PlaylistDraft } from './yearlists';
 import { detectEras, monthIndex, type Era } from './eras';
 import { onThisDay, todayIn, type DayLook } from './onthisday';
 import { rediscover, SILENCE_MONTHS, type Rediscover } from './comebacks';
+import { artistKey, discoverDescription, heardUris, knownArtists, pickTracks, rankNewArtists, seedArtists, steppingStones, PER_ARTIST, SEED_COUNT, TOTAL, type SeedRange, type Similar } from './discover';
 import { isLoggedIn, login } from '../auth';
-import { addItems, createPlaylist } from '../spotify';
+import { rankCandidates } from '../match';
+import { fetchSimilar, fetchTopTracks } from '../lastfm';
+import { saveHandoff, type HandoffRow } from '../handoff';
+import { addItems, createPlaylist, searchArtists, searchTracks, type Track } from '../spotify';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const status = $('status');
@@ -57,6 +61,8 @@ function draftHtml(d: PlaylistDraft, summary: string): string {
 out.addEventListener('click', async (e) => {
   const el = e.target as HTMLElement;
   if (el.closest('[data-login]')) return login('stats.html');
+  const discover = el.closest<HTMLButtonElement>('[data-discover]');
+  if (discover) return runDiscover(discover);
   const btn = el.closest<HTMLButtonElement>('[data-create]');
   const d = btn && drafts.get(btn.dataset.create!);
   if (!btn || !d) return;
@@ -145,6 +151,119 @@ function rediscoverHtml(r: Rediscover): string {
     </section>`;
 }
 
+// --- Discover: new artists via Last.fm, matched on Spotify, reviewed on the main page ---
+let loaded: { hist: History; eras: Era[] } | null = null;
+/** Artists to try on Spotify; some won't be there or have only heard tracks. */
+const DISCOVER_TRIES = 30;
+/** Last.fm top tracks tried per artist before giving up on it. */
+const TRACK_TRIES = 4;
+
+function discoverHtml(eras: Era[]): string {
+  return `
+    <section class="chapter">
+      <h2>Discover</h2>
+      <p class="muted">Up to ${TOTAL} songs by artists you have never played, similar to your top ${SEED_COUNT} artists. Max ${PER_ARTIST} per artist.</p>
+      <div class="discover-form">
+        <label>Based on
+          <select id="discover-seeds">
+            <option value="recent">Recent years</option>
+            <option value="year">The last year</option>
+            <option value="all">All time</option>
+            ${eras.map((e, i) => `<option value="era-${i}">Era: ${esc(e.artists.join(' & '))} (${month(e.from)} – ${e.ongoing ? 'now' : month(e.to)})</option>`).join('')}
+          </select>
+        </label>
+        <label>Adventure <span class="hint">close to home ↔ one step further</span>
+          <input id="discover-hops" type="range" min="1" max="2" step="1" value="1" />
+        </label>
+      </div>
+      <p class="draft-actions">${
+        isLoggedIn()
+          ? `<button class="small primary" data-discover>Find new music</button>`
+          : `<button class="small ghost" data-login>Log in with Spotify to discover</button>`
+      } <span class="draft-status" id="discover-status"></span></p>
+      <p class="credit">Similar artists from <a href="https://www.last.fm" target="_blank" rel="noopener">Last.fm</a></p>
+    </section>`;
+}
+
+async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>, stop: () => boolean): Promise<void> {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length && !stop()) await fn(items[next++]);
+    }),
+  );
+}
+
+async function runDiscover(btn: HTMLButtonElement) {
+  if (!loaded) return;
+  const note = $('discover-status');
+  const choice = $<HTMLSelectElement>('discover-seeds').value;
+  const hops = $<HTMLInputElement>('discover-hops').value === '2' ? 2 : 1;
+  const era = choice.startsWith('era-') ? loaded.eras[Number(choice.slice(4))] : null;
+  const range: SeedRange = era ? { kind: 'era', era } : { kind: choice as 'recent' | 'year' | 'all' };
+  const label = era ? `${era.artists.join(' & ')} era` : { recent: 'top artists of recent years', year: 'top artists of the last year', all: 'all-time top artists' }[choice]!;
+  const { hist } = loaded;
+  btn.disabled = true;
+  try {
+    const seeds = seedArtists(hist, range);
+    if (!seeds.length) throw new Error('No plays in this period.');
+    const similar = new Map<string, Similar[]>();
+    const lookup = (a: string) => similar.get(artistKey(a));
+    const load = async (names: string[]) => {
+      await mapLimit(names.filter((n) => !lookup(n)), 4, async (n) => void similar.set(artistKey(n), (await fetchSimilar(n)).similar), () => false);
+    };
+    note.textContent = `Finding artists similar to ${seeds.length} of yours…`;
+    await load(seeds.map((s) => s.artist));
+    if (hops === 2) {
+      note.textContent = 'One step further…';
+      await load(steppingStones(seeds, lookup));
+    }
+    const known = knownArtists(hist);
+    const heard = heardUris(hist);
+    const candidates = rankNewArtists(seeds, lookup, known, hops).slice(0, DISCOVER_TRIES);
+    if (!candidates.length) throw new Error('Last.fm has no similar artists you haven’t played yet.');
+
+    // Match each artist on Spotify: exact artist name, then its Last.fm top tracks.
+    const matched = new Map<string, (HandoffRow & { uri: string })[]>();
+    let usable = 0;
+    let done = 0;
+    await mapLimit(
+      candidates,
+      3,
+      async (c) => {
+        note.textContent = `Matching on Spotify… ${++done}/${candidates.length}`;
+        const top = await fetchTopTracks(c.artist);
+        const sp = (await searchArtists(c.artist)).find((a) => artistKey(a.name) === artistKey(c.artist));
+        if (!sp || known.has(artistKey(sp.name))) return;
+        const rows: (HandoffRow & { uri: string })[] = [];
+        for (const t of top.tracks.slice(0, TRACK_TRIES)) {
+          if (rows.length >= PER_ARTIST) break;
+          const options = rankCandidates(t.name, await searchTracks(t.name, sp.name), sp.id)
+            .filter((o) => !heard.has(o.track.uri))
+            .map(({ track, confidence }) => ({ track: track as Track, confidence }));
+          if (options.length) rows.push({ title: t.name, artist: sp, note: `via ${c.via}`, options, choice: 0, uri: options[0].track.uri });
+        }
+        matched.set(c.artist, rows);
+        usable += rows.length;
+      },
+      () => usable >= TOTAL + PER_ARTIST * 3, // a little spare for duplicates
+    );
+
+    const picks = pickTracks(candidates, (a) => matched.get(a), heard);
+    if (!picks.length) throw new Error('None of the suggestions could be found on Spotify.');
+    saveHandoff({
+      heading: `Discover: ${picks.length} songs by ${new Set(picks.map((p) => p.artist)).size} artists you’ve never played`,
+      name: `Discover: ${era ? `${era.artists[0]} era` : { recent: 'recent taste', year: 'this year', all: 'all-time taste' }[choice]}`,
+      description: discoverDescription(picks, label),
+      rows: picks.map((p) => p.track),
+    });
+    window.location.href = './';
+  } catch (err) {
+    btn.disabled = false;
+    note.textContent = err instanceof Error ? err.message : String(err);
+  }
+}
+
 function render(w: Wrapped, hist: History) {
   const t = w.totals;
   const first = w.firstStream;
@@ -190,8 +309,9 @@ function render(w: Wrapped, hist: History) {
     </section>
 
     ${onThisDayHtml(onThisDay(hist, todayIn(DEFAULT_TZ)))}
-    ${erasHtml(detectEras(hist), t.first, t.last)}
+    ${erasHtml(loaded!.eras, t.first, t.last)}
     ${rediscoverHtml(rediscover(hist))}
+    ${discoverHtml(loaded!.eras)}
     ${yearsHtml(yearPlaylists(hist))}
 
     <details class="chapter">
@@ -213,6 +333,7 @@ $('file').addEventListener('change', async (e) => {
   await new Promise((r) => setTimeout(r, 30)); // let the status paint before the heavy work
   try {
     const hist = buildHistory(await readFiles(files));
+    loaded = { hist, eras: detectEras(hist) };
     render(buildWrapped(hist, 10), hist);
     setStatus(`Loaded ${n0(hist.streams.length)} streams, ${hist.streams[0]?.day} to ${hist.streams.at(-1)?.day}.`, 'ok');
   } catch (err) {

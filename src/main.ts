@@ -3,6 +3,7 @@ import { handleRedirect, isLoggedIn, login, logout, takeReturnTo } from './auth'
 import { parseSetlist, rankCandidates, type Confidence } from './match';
 import { cleanSearchResults, isoDate, mixDescription, mixName, mixToText, playedSongs, prepareMix } from './concerts';
 import { extractSetlistId, fetchSetlist, playlistDescription, playlistName, searchSetlists, toSetlistText, WORKER_URL, type Setlist } from './setlistfm';
+import { takeHandoff } from './handoff';
 import { addItems, createPlaylist, searchAny, searchArtists, searchTracks, type Artist, type Track } from './spotify';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -14,6 +15,7 @@ const DRAFT_KEY = 'setlist_draft';
 interface Row {
   title: string;
   artist: Artist | null; // the artist this row was searched under
+  note?: string; // extra context after the artist (Discover: "via <seed>")
   options: { track: Track; confidence: Confidence | 'manual' }[];
   choice: number; // index into options, -1 = skip
 }
@@ -24,6 +26,7 @@ let importedFrom: string | null = null; // setlist.fm URL, for attribution
 let description: string | null = null; // set for prep mixes; otherwise built from importedFrom
 let concerts: { query: string; setlists: Setlist[]; pages: number; more: boolean } | null = null;
 let searchingRow: number | null = null; // row with the manual search box open
+let heading: string | null = null; // review heading for handed-off reviews (Discover)
 
 function show(view: keyof typeof views) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
@@ -264,7 +267,7 @@ function formatDuration(ms: number) {
 }
 
 function renderReview() {
-  $('artist-line').innerHTML = `Artist: <strong>${escapeHtml(artist!.name)}</strong>`;
+  $('artist-line').innerHTML = heading ? escapeHtml(heading) : `Artist: <strong>${escapeHtml(artist!.name)}</strong>`;
   const found = rows.filter((r) => r.choice >= 0).length;
   const toCheck = rows.filter((r) => r.choice >= 0 && !['exact', 'manual'].includes(r.options[r.choice].confidence)).length;
   $('summary').textContent =
@@ -286,7 +289,7 @@ function renderReview() {
           <span class="num">${i + 1}</span>
           ${img ? `<img src="${img}" alt="" width="48" height="48" />` : '<span class="noimg"></span>'}
           <div class="info">
-            <span class="requested">${escapeHtml(row.title)}${row.artist && row.artist.id !== artist!.id ? ` <span class="by">· ${escapeHtml(row.artist.name)}</span>` : ''}</span>
+            <span class="requested">${escapeHtml(row.title)}${row.artist && row.artist.id !== artist!.id ? ` <span class="by">· ${escapeHtml(row.artist.name)}${row.note ? `, ${escapeHtml(row.note)}` : ''}</span>` : ''}</span>
             <select data-row="${i}" aria-label="Match for ${escapeHtml(row.title)}">
               ${options}
               <option value="-1" ${row.choice < 0 ? 'selected' : ''}>${row.options.length ? 'Skip this song' : 'Not found on Spotify'}</option>
@@ -395,6 +398,7 @@ function startOver() {
   importedFrom = null;
   description = null;
   searchingRow = null;
+  heading = null;
   $('create-btn').hidden = false;
   $('back-btn').hidden = false;
   $('new-btn').hidden = true;
@@ -436,5 +440,17 @@ $('back-btn').addEventListener('click', () => {
     setStatus((err as Error).message, 'error');
   }
   loadDraft();
+  const handoff = isLoggedIn() ? takeHandoff() : null;
+  if (handoff) {
+    // Ready-made review from the stats page: no single artist, no setlist to edit.
+    rows = handoff.rows;
+    artist = { id: '', name: '' };
+    heading = handoff.heading;
+    description = handoff.description;
+    fields().name.value = handoff.name;
+    $('back-btn').hidden = true;
+    renderReview();
+    return show('review');
+  }
   show(isLoggedIn() ? 'form' : 'login');
 })();
