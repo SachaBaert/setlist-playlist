@@ -1,0 +1,24 @@
+name: Create tracker KV namespace
+
+# One-off (safe to re-run): finds or creates the Workers KV namespace for the
+# live history tracker and prints its id, to bind as TRACKER in wrangler.toml.
+on:
+  workflow_dispatch:
+
+jobs:
+  kv:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Find or create "setlist-tracker"
+        run: |
+          W="npx --yes wrangler@4.160.0"
+          id=$($W kv namespace list 2>/dev/null | sed -n '/^\[/,$p' | jq -r '.[] | select(.title == "setlist-tracker") | .id')
+          if [ -z "$id" ]; then
+            $W kv namespace create setlist-tracker
+            id=$($W kv namespace list 2>/dev/null | sed -n '/^\[/,$p' | jq -r '.[] | select(.title == "setlist-tracker") | .id')
+          fi
+          echo "TRACKER_KV_ID=$id"
+          test -n "$id"

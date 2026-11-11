@@ -13,14 +13,20 @@
       <header>
         <p class="eyebrow"><a href="./">Setlist → Spotify</a> · Stats</p>
         <h1>Your all-time Wrapped</h1>
-        <p class="lede">Load your Spotify Extended Streaming History. It is read on this device only; nothing is uploaded.</p>
+        <p class="lede">Load your Spotify Extended Streaming History. It is read and saved on this device only; nothing from it is uploaded.</p>
       </header>
 
       <section id="load-view" class="import">
         <label>Export file <span class="hint">my_spotify_data.zip, or the Streaming_History_Audio_*.json files</span>
           <input id="file" type="file" accept=".zip,.json,application/zip,application/json" multiple />
         </label>
-        <p class="credit">Request it at Spotify → Account → Privacy → “Extended streaming history”.</p>
+        <p class="credit">Request it at Spotify → Account → Privacy → “Extended streaming history”. Loading a newer export later adds to what is saved.</p>
+        <p class="draft-actions" id="cache-actions" hidden><span class="muted" id="cache-note"></span> <button class="small ghost" id="forget-btn">Forget my data</button></p>
+      </section>
+
+      <section id="tracker" class="import">
+        <p><strong>Live tracking</strong> <span class="hint">keeps your history growing without new exports: checks your recently played songs every hour</span></p>
+        <p class="draft-actions"><span id="tracker-actions"></span> <span class="draft-status" id="tracker-status"></span></p>
       </section>
 
       <p id="status" role="status"></p>

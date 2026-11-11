@@ -1,5 +1,7 @@
 // Spotify login with Authorization Code + PKCE (no client secret needed).
 
+import { startTracker } from './tracker';
+
 export const CLIENT_ID = 'bde1387dee44433ab2311f114c7eae93';
 
 export const REDIRECT_URI = import.meta.env.DEV
@@ -11,6 +13,11 @@ const TOKEN_KEY = 'spotify_token';
 const VERIFIER_KEY = 'pkce_verifier';
 const STATE_KEY = 'pkce_state';
 const RETURN_KEY = 'login_return_to';
+const MODE_KEY = 'login_mode';
+/** Outcome of a "Start tracking" login, read once by the stats page: 'ok' or an error message. */
+export const TRACKER_RESULT_KEY = 'tracker_result';
+/** Extra scope for the live history tracker (only the Worker uses it). */
+const TRACKER_SCOPE = 'user-read-recently-played';
 
 interface StoredToken {
   access_token: string;
@@ -32,9 +39,15 @@ async function sha256Base64Url(input: string): Promise<string> {
     .replace(/=+$/, '');
 }
 
-/** `returnTo`: a page of this site to go back to after login (the redirect URI is the main page). */
-export async function login(returnTo?: string): Promise<void> {
+/**
+ * `returnTo`: a page of this site to go back to after login (the redirect URI is the main page).
+ * `tracker`: a separate login whose refresh token goes to the Worker's tracker, not to this browser,
+ * so the two never use (and rotate) the same token.
+ */
+export async function login(returnTo?: string, opts: { tracker?: boolean } = {}): Promise<void> {
   if (returnTo) sessionStorage.setItem(RETURN_KEY, returnTo);
+  if (opts.tracker) sessionStorage.setItem(MODE_KEY, 'tracker');
+  else sessionStorage.removeItem(MODE_KEY);
   const verifier = randomString(64);
   const state = randomString(16);
   sessionStorage.setItem(VERIFIER_KEY, verifier);
@@ -46,7 +59,7 @@ export async function login(returnTo?: string): Promise<void> {
     redirect_uri: REDIRECT_URI,
     code_challenge_method: 'S256',
     code_challenge: await sha256Base64Url(verifier),
-    scope: SCOPES,
+    scope: opts.tracker ? `${SCOPES} ${TRACKER_SCOPE}` : SCOPES,
     state,
   });
   window.location.href = `https://accounts.spotify.com/authorize?${params}`;
@@ -56,14 +69,18 @@ export function logout(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function requestToken(body: Record<string, string>): Promise<void> {
+async function fetchToken(body: Record<string, string>) {
   const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: CLIENT_ID, ...body }),
   });
   if (!res.ok) throw new Error(`Token request failed (${res.status})`);
-  const data = await res.json();
+  return res.json();
+}
+
+async function requestToken(body: Record<string, string>): Promise<void> {
+  const data = await fetchToken(body);
   const previous = readToken();
   const token: StoredToken = {
     access_token: data.access_token,
@@ -98,13 +115,24 @@ export async function handleRedirect(): Promise<void> {
   }
   sessionStorage.removeItem(VERIFIER_KEY);
   sessionStorage.removeItem(STATE_KEY);
+  const tracker = sessionStorage.getItem(MODE_KEY) === 'tracker';
+  sessionStorage.removeItem(MODE_KEY);
 
-  await requestToken({
+  const body = {
     grant_type: 'authorization_code',
     code: code!,
     redirect_uri: REDIRECT_URI,
     code_verifier: verifier,
-  });
+  };
+  if (!tracker) return requestToken(body);
+  // Tracker login: hand the token to the Worker, keep the browser's own login as it was.
+  try {
+    const data = await fetchToken(body);
+    await startTracker(data.refresh_token);
+    sessionStorage.setItem(TRACKER_RESULT_KEY, 'ok');
+  } catch (err) {
+    sessionStorage.setItem(TRACKER_RESULT_KEY, err instanceof Error ? err.message : String(err));
+  }
 }
 
 function readToken(): StoredToken | null {

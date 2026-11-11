@@ -3,8 +3,11 @@
 //   ?artist=<name>&p=<n>   concert search by artist, songs included (cached for 6 hours)
 //   ?similar=<artist>      Last.fm artist.getSimilar, top 30 (cached for a week)
 //   ?toptracks=<artist>    Last.fm artist.getTopTracks, top 10 (cached for a week)
+//   /tracker/*             live history tracker, plus an hourly cron (see tracker.js)
 // - Keeps the API keys secret (dashboard secrets SETLISTFM_API_KEY and LASTFM_API_KEY).
 // - Adds CORS headers for the app's own origins only.
+
+import { handleTracker, runTracker } from './tracker.js';
 
 const ALLOWED_ORIGINS = ['https://sachabaert.github.io', 'http://127.0.0.1:5173'];
 
@@ -13,10 +16,12 @@ export default {
     const origin = request.headers.get('Origin') ?? '';
     const cors = {
       'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
       Vary: 'Origin',
     };
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (new URL(request.url).pathname.startsWith('/tracker/')) return handleTracker(request, env, cors);
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405, cors);
 
     const params = new URL(request.url).searchParams;
@@ -38,6 +43,10 @@ export default {
     const response = json(simplify(await upstream.json()), 200, { 'Cache-Control': 'public, max-age=86400' });
     ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
     return withCors(response, cors);
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runTracker(env));
   },
 };
 

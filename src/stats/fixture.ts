@@ -200,3 +200,29 @@ export const discoverSimilar: Record<string, { name: string; match: number }[]> 
   ],
   'Shared Find': [{ name: 'Further Out', match: 0.5 }],
 };
+
+/**
+ * Fake `GET /me/player/recently-played` answer for the tracker, continuing the
+ * main fixture (whose export ends on 2019-07-01 at 10:30 UTC, "Long Track 13"):
+ * - "Long Track 6" at 2019-07-01T05:30Z: already in the export → dropped when merged.
+ * - 3 new plays after the export: 2019-07-02 (twice "Echo One") and 2019-08-01T00:10Z
+ *   (a new UTC month, stored under listens:2019-08). "Tiny Intro" is 12 s long, still a play.
+ * - A podcast episode and a null track: ignored.
+ */
+export function recentlyPlayedFixture() {
+  const item = (played_at: string, artist: string, name: string, duration_ms: number) => ({
+    played_at,
+    track: { type: 'track', name, duration_ms, uri: `spotify:track:fake${(artist + name).replace(/\W/g, '')}`, artists: [{ name: artist }], album: { name: `${artist} album` } },
+  });
+  return {
+    items: [
+      item('2019-08-01T00:10:00.000Z', 'Mock Orchestra', 'Tiny Intro', 12_000),
+      { played_at: '2019-07-20T10:00:00.000Z', track: { type: 'episode', name: 'Fake Pod 2', duration_ms: 1_800_000 } },
+      { played_at: '2019-07-20T11:00:00.000Z', track: null },
+      item('2019-07-02T12:05:00.000Z', 'Example Echo', 'Echo One', 200_000),
+      item('2019-07-02T12:00:00.000Z', 'Example Echo', 'Echo One', 200_000),
+      item('2019-07-01T05:30:00.000Z', 'Test Pattern', 'Long Track 6', 3_600_000),
+    ],
+    cursors: { after: '1564618200000', before: '1561959000000' },
+  };
+}

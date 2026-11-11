@@ -7,7 +7,10 @@ import { detectEras, monthIndex, type Era } from './eras';
 import { onThisDay, todayIn, type DayLook } from './onthisday';
 import { rediscover, SILENCE_MONTHS, type Rediscover } from './comebacks';
 import { artistKey, discoverDescription, heardUris, knownArtists, pickTracks, rankNewArtists, seedArtists, steppingStones, PER_ARTIST, SEED_COUNT, TOTAL, type SeedRange, type Similar } from './discover';
-import { isLoggedIn, login } from '../auth';
+import { getAccessToken, isLoggedIn, login, TRACKER_RESULT_KEY } from '../auth';
+import { coverage, fromListens, latest, mergeStreams, slim, type CachedStream } from './cache';
+import { forgetCache, loadCache, saveCache } from './store';
+import { stopTracker, trackedListens, TrackerError, type TrackerStatus } from '../tracker';
 import { rankCandidates } from '../match';
 import { fetchSimilar, fetchTopTracks } from '../lastfm';
 import { saveHandoff, type HandoffRow } from '../handoff';
@@ -84,7 +87,7 @@ function yearsHtml(lists: PlaylistDraft[]): string {
   return `
     <section class="chapter">
       <h2>Year playlists</h2>
-      <p class="muted">Your top ${YEAR_TOP} songs of each year, as private playlists.${isLoggedIn() ? '' : ' Log in once; you will need to load the export again after.'}</p>
+      <p class="muted">Your top ${YEAR_TOP} songs of each year, as private playlists.</p>
       ${lists.map((d) => draftHtml(d, `<strong>${d.id.slice(5)}</strong> <span class="by">${d.songs.length} songs, starting with ${esc(d.songs[0].track)}</span>`)).join('')}
     </section>`;
 }
@@ -324,19 +327,128 @@ function render(w: Wrapped, hist: History) {
     </details>`;
 }
 
+// --- Local cache + tracker ---
+let cached: CachedStream[] = [];
+const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+function show(streams: CachedStream[], from: 'cache' | 'file' | 'tracker') {
+  out.innerHTML = '';
+  drafts.clear();
+  const hist = buildHistory(streams);
+  if (!hist.streams.length) return setStatus('No music in the saved history yet.', 'info');
+  loaded = { hist, eras: detectEras(hist) };
+  render(buildWrapped(hist, 10), hist);
+  const c = coverage(streams);
+  const tracked = c.tracked
+    ? ` Includes ${n0(c.tracked)} tracked ${c.tracked === 1 ? 'play' : 'plays'} from ${date(c.trackedFrom!.slice(0, 10))} (hours estimated from song length${c.exportEnd ? `; nothing between the export’s end on ${date(c.exportEnd.slice(0, 10))} and the start of tracking` : ''}).`
+    : '';
+  const src = { cache: 'Loaded from this device', file: 'Loaded and saved on this device', tracker: 'Updated with tracked plays' }[from];
+  setStatus(`${src}: ${n0(hist.streams.length)} streams, ${hist.streams[0].day} to ${hist.streams.at(-1)!.day}.${tracked}`, 'ok');
+  $('cache-actions').hidden = false;
+  $('cache-note').textContent = 'Your history is saved in this browser.';
+}
+
+async function store(streams: CachedStream[]) {
+  cached = streams;
+  try {
+    await saveCache(streams);
+  } catch {
+    setStatus('Could not save your history in this browser; load the export again next time.', 'error');
+  }
+}
+
 $('file').addEventListener('change', async (e) => {
   const files = (e.target as HTMLInputElement).files;
   if (!files?.length) return;
-  out.innerHTML = '';
-  drafts.clear();
   setStatus('Reading your history…');
   await new Promise((r) => setTimeout(r, 30)); // let the status paint before the heavy work
   try {
-    const hist = buildHistory(await readFiles(files));
-    loaded = { hist, eras: detectEras(hist) };
-    render(buildWrapped(hist, 10), hist);
-    setStatus(`Loaded ${n0(hist.streams.length)} streams, ${hist.streams[0]?.day} to ${hist.streams.at(-1)?.day}.`, 'ok');
+    const merged = mergeStreams(cached, slim(await readFiles(files)));
+    show(merged, 'file');
+    await store(merged);
+    void syncTracker();
   } catch (err) {
     setStatus(err instanceof Error ? err.message : String(err), 'error');
   }
 });
+
+$('forget-btn').addEventListener('click', async () => {
+  if (!confirm('Remove your saved listening history from this browser? Tracked plays stay on the Worker until you stop tracking.')) return;
+  await forgetCache();
+  cached = [];
+  loaded = null;
+  out.innerHTML = '';
+  $('cache-actions').hidden = true;
+  setStatus('Forgotten. Nothing is saved in this browser any more.', 'ok');
+});
+
+const trackerNote = $('tracker-status');
+const trackerActions = $('tracker-actions');
+
+function trackerHtml(st: TrackerStatus | null) {
+  if (!isLoggedIn()) return `<button class="small ghost" data-login>Log in with Spotify to set up tracking</button>`;
+  if (st?.tracking) return `<button class="small ghost" id="stop-tracking">Stop tracking</button>`;
+  return `<button class="small primary" id="start-tracking">Start tracking</button>`;
+}
+
+function trackerText(st: TrackerStatus): string {
+  if (!st.tracking) return st.lastError ? `Tracking stopped: ${st.lastError}` : 'Not tracking.';
+  const last = st.lastRun ? ` Last check ${when(st.lastRun)}${st.lastCount ? `, ${st.lastCount} new` : ''}.` : '';
+  return `Tracking since ${when(st.startedAt!)}.${last}${st.lastError ? ` Last error: ${st.lastError}` : ''}`;
+}
+
+/** Status, and new tracked plays merged into the cache. */
+async function syncTracker() {
+  let st: TrackerStatus | null = null;
+  try {
+    if (isLoggedIn()) {
+      const token = await getAccessToken();
+      const res = await trackedListens(token, latest(cached));
+      st = res;
+      trackerNote.textContent = trackerText(st);
+      if (res.listens.length) {
+        const merged = mergeStreams(cached, fromListens(res.listens));
+        if (merged.length !== cached.length) {
+          show(merged, 'tracker');
+          await store(merged);
+        }
+      }
+    }
+  } catch (err) {
+    trackerNote.textContent =
+      err instanceof TrackerError && err.status === 401 ? 'Tracking only works for the owner’s Spotify account.'
+      : err instanceof TrackerError && err.status === 503 ? 'The tracker isn’t set up on the Worker yet.'
+      : err instanceof Error ? err.message : String(err);
+  }
+  trackerActions.innerHTML = trackerHtml(st);
+}
+
+$('tracker').addEventListener('click', async (e) => {
+  const el = e.target as HTMLElement;
+  if (el.closest('[data-login]')) return login('stats.html');
+  if (el.closest('#start-tracking')) return login('stats.html', { tracker: true });
+  if (el.closest('#stop-tracking')) {
+    try {
+      await stopTracker(await getAccessToken());
+      trackerActions.innerHTML = trackerHtml({ tracking: false } as TrackerStatus);
+      trackerNote.innerHTML = 'Stopped; the Worker no longer has your token. To revoke access completely, remove this app at <a href="https://www.spotify.com/account/apps/" target="_blank" rel="noopener">spotify.com/account/apps</a>.';
+    } catch (err) {
+      trackerNote.textContent = err instanceof Error ? err.message : String(err);
+    }
+  }
+});
+
+(async () => {
+  const result = sessionStorage.getItem(TRACKER_RESULT_KEY);
+  sessionStorage.removeItem(TRACKER_RESULT_KEY);
+  const saved = await loadCache();
+  if (saved) {
+    cached = saved;
+    setStatus('Loading your saved history…');
+    await new Promise((r) => setTimeout(r, 30));
+    show(saved, 'cache');
+  }
+  await syncTracker();
+  if (result && result !== 'ok') trackerNote.textContent = `Could not start tracking: ${result}`;
+  else if (result === 'ok') trackerNote.textContent = `Tracking started. ${trackerNote.textContent}`;
+})();
